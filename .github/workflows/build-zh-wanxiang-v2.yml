@@ -1,0 +1,131 @@
+name: Build and publish Clink Chinese Wanxiang v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "tools/build_zh_wanxiang_v2.py"
+      - "WANXIANG_V2.md"
+      - ".github/workflows/build-zh-wanxiang-v2.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clink-zh-wanxiang-v2
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Clink pack fork
+        uses: actions/checkout@v4
+
+      - name: Checkout Wanxiang v17.3.0
+        uses: actions/checkout@v4
+        with:
+          repository: amzxyz/rime-wanxiang
+          ref: v17.3.0
+          path: _wanxiang
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build standalone zh_wx sources
+        run: |
+          set -euo pipefail
+          python3 tools/build_zh_wanxiang_v2.py \
+            _wanxiang/dicts/jichu.dict.yaml \
+            _wanxiang/dicts/zi.dict.yaml \
+            _wanxiang/dicts/lianxiang.dict.yaml \
+            --code zh_wx \
+            --out-dir source \
+            --lexicon-limit 300000 \
+            --max-candidates 16 \
+            --max-ime-readings 300000 \
+            --max-word-length 12 \
+            --max-following 48 \
+            --single-char-ime-min-weight 200
+
+      - name: Build CLEX and CIME with Clink official tools
+        run: |
+          set -euo pipefail
+          python3 build-pack.py zh_wx source/zh_wx.txt
+          python3 tools/build-ime-table.py zh_wx source/zh_wx-ime.tsv
+          python3 tools/validate-pack.py zh_wx
+          ls -lh Lexicons/zh_wx.*
+
+      - name: Regression tests for bad Chinese candidates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          rows = {}
+          for raw in Path('Lexicons/zh_wx.cime').read_text(encoding='utf-8').splitlines():
+              fields = raw.split('\t')
+              if len(fields) >= 2:
+                  rows[fields[0]] = fields[1:]
+
+          expected = {
+              'pinyin': '拼音',
+              'pin yin': '拼音',
+              'nihao': '你好',
+              'ni hao': '你好',
+              'meiyou': '没有',
+              'mei you': '没有',
+              'zenmehuishi': '怎么回事',
+              'zen me hui shi': '怎么回事',
+              'weishenme': '为什么',
+              'wei shen me': '为什么',
+          }
+          failed = []
+          for key, want in expected.items():
+              got = rows.get(key, [])
+              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
+              if not got or got[0] != want:
+                  failed.append((key, want, got[:5]))
+
+          pin = rows.get('pin', [])
+          yin = rows.get('yin', [])
+          print('pin =>', ' / '.join(pin[:12]))
+          print('yin =>', ' / '.join(yin[:12]))
+          if '穦' in pin[:5]:
+              failed.append(('pin', '穦 must not be top-5', pin[:5]))
+
+          if failed:
+              raise SystemExit('Regression failure: ' + repr(failed))
+          PY
+
+      - name: Publish only the standalone zh_wx pack
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: vzh-wx-v2-${{ github.run_number }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          find Lexicons -mindepth 1 -maxdepth 1 \
+            ! -name 'zh_wx.clex' \
+            ! -name 'zh_wx.cime' \
+            ! -name 'zh_wx.cngm' \
+            -exec rm -rf {} +
+
+          rm -rf out
+          mkdir -p out
+          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('out/manifest.json').read_text())
+          codes = [p['code'] for p in m['packs']]
+          print('Manifest codes:', codes)
+          assert codes == ['zh_wx'], codes
+          PY
+
+          gh release create "$VERSION" \
+            --title "Clink 中文万象 v2 $VERSION" \
+            --notes-file WANXIANG_V2.md \
+            out/manifest.json \
+            out/assets/*
