@@ -1,0 +1,135 @@
+name: Build and publish Chinese Wanxiang pack
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "tools/rime_to_clink.py"
+      - "WANXIANG_ATTRIBUTION.md"
+      - ".github/workflows/build-zh-wanxiang.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clink-zh-wanxiang
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out Clink language packs
+        uses: actions/checkout@v4
+
+      - name: Check out pinned Wanxiang data
+        uses: actions/checkout@v4
+        with:
+          repository: amzxyz/rime-wanxiang
+          ref: 669d3af7a53a3ec0fd268a82bbeb0b0f948ae944
+          path: _wanxiang
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Convert Wanxiang to Clink IME source
+        run: |
+          set -euo pipefail
+          python3 tools/rime_to_clink.py \
+            _wanxiang/dicts/jichu.dict.yaml \
+            _wanxiang/dicts/zi.dict.yaml \
+            _wanxiang/dicts/chengyu.dict.yaml \
+            --seed-cime Lexicons/zh.cime \
+            --out-dir source \
+            --max-candidates 16 \
+            --max-readings 250000 \
+            --max-word-length 12
+
+      - name: Build enhanced zh.cime
+        run: |
+          set -euo pipefail
+          python3 tools/build-ime-table.py zh source/zh-ime.tsv
+          python3 tools/validate-pack.py zh
+          wc -l Lexicons/zh.cime
+          du -h Lexicons/zh.cime
+
+      - name: Sanity-check common Pinyin readings
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          wanted = {
+              "nihao", "meiyou", "zenme", "zenmehuishi",
+              "weishenme", "buzhidao", "keyi", "xianzai",
+              "jintian", "mingtian",
+          }
+          rows = {}
+          for raw in Path("Lexicons/zh.cime").read_text(encoding="utf-8").splitlines():
+              fields = raw.split("\t")
+              if len(fields) >= 2:
+                  rows[fields[0]] = fields[1:]
+          missing = sorted(wanted - rows.keys())
+          for key in sorted(wanted):
+              print(key, "=>", " / ".join(rows.get(key, [])[:5]) or "MISSING")
+          if missing:
+              raise SystemExit("Missing common readings: " + ", ".join(missing))
+          PY
+
+      - name: Build a release containing only the Chinese pack
+        env:
+          VERSION: vzh-wanxiang-${{ github.run_number }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          find Lexicons -maxdepth 1 -type f -name '*.clex' ! -name 'zh.clex' -delete
+
+          rm -rf out
+          mkdir -p out
+          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path("out/manifest.json").read_text())
+          assert [p["code"] for p in m["packs"]] == ["zh"], m
+          print("Manifest pack:", m["packs"][0]["code"])
+          print("Assets:", len(m["packs"][0]["assets"]))
+          PY
+
+      - name: Publish verified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: vzh-wanxiang-${{ github.run_number }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          gh release create "$VERSION" \
+            --draft \
+            --title "Clink 中文万象增强包 $VERSION" \
+            --notes-file WANXIANG_ATTRIBUTION.md
+
+          upload() {
+            local file="$1" attempt=1
+            until gh release upload "$VERSION" "$file" --clobber; do
+              if (( attempt == 8 )); then
+                echo "Upload failed after $attempt attempts: $file" >&2
+                return 1
+              fi
+              sleep $((attempt * 10))
+              ((attempt += 1))
+            done
+          }
+
+          while IFS= read -r -d '' file; do
+            upload "$file"
+          done < <(find out/assets -type f -print0 | sort -z)
+
+          upload out/manifest.json
+
+          test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = true
+          gh release edit "$VERSION" --draft=false
+          echo "Published $VERSION"
