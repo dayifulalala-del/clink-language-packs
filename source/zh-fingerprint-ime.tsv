@@ -1,0 +1,6 @@
+# Clink zh IME fingerprint. Keep these four rows deliberately tiny.
+# Direct lookup and pin + yin composition both yield the same unmistakable text.
+pin	万象
+yin	验证
+pinyin	万象验证
+pin yin	万象验证
