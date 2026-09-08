@@ -9,6 +9,8 @@
 - 万象数据许可：Creative Commons Attribution 4.0 International (CC BY 4.0)
 - 许可文本：https://creativecommons.org/licenses/by/4.0/
 
+构建流程固定到上述提交，以保证每次发布都使用同一份可复现的数据源。
+
 ## 做了哪些修改
 
 原始 Rime 词条被转换为 Clink 的拼音 reading → 候选词格式；拼音被标准化为 Clink 使用的无声调全拼格式；同音候选按万象词频排序；每个 reading 最多保留 16 个候选；Clink 官方原有 `zh.cime` 只作为缺失候选与缺失 reading 的后备覆盖。
