@@ -1,14 +1,18 @@
-name: Build and publish zh IME fingerprint
+name: Build and publish controlled zh IME probe
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: "B = pin -> 榀; A = pin -> 拼. Record the previous device test before switching."
+        type: choice
+        options: [B, A]
+        default: B
   push:
     branches: [main]
     paths:
-      - "source/zh-fingerprint.lexicon.tsv"
-      - "source/zh-fingerprint-ime.tsv"
-      - "FINGERPRINT_TEST.md"
-      - "BLACKBOX_TEST_PLAN.md"
+      - "tools/zh_ime_probe.py"
+      - "tools/test_zh_ime_probe.py"
       - ".github/workflows/build-zh-ime-fingerprint.yml"
 
 permissions:
@@ -21,92 +25,48 @@ concurrency:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 12
+    env:
+      VARIANT: ${{ inputs.variant || 'B' }}
+      VERSION: vzh-ime-probe-${{ github.run_number }}-${{ github.run_attempt }}-${{ inputs.variant || 'B' }}
+      PYTHONUTF8: "1"
     steps:
-      - name: Check out language-pack fork
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-
-      - name: Build isolated minimal zh pack
+      - name: Offline regression tests
+        run: python3 -m unittest discover -s tools -p test_zh_ime_probe.py -v
+      - name: Build one zh pack and verify the A/B one-row difference
         run: |
           set -euo pipefail
-          stage="$RUNNER_TEMP/clink-zh-fingerprint"
-          mkdir -p "$stage/source" "$stage/tools" "$stage/catalog"
-          cp build-pack.py "$stage/"
-          cp tools/build-ime-table.py tools/build-release-manifest.py tools/validate-pack.py "$stage/tools/"
-          cp catalog/language-wave.json "$stage/catalog/"
-          cp source/zh-fingerprint.lexicon.tsv "$stage/source/zh.lexicon.tsv"
-          cp source/zh-fingerprint-ime.tsv "$stage/source/zh-ime.tsv"
-
-          pushd "$stage"
-          python3 build-pack.py zh source/zh.lexicon.tsv
-          python3 tools/build-ime-table.py zh source/zh-ime.tsv
-          python3 tools/validate-pack.py zh
-          popd
-
-      - name: Verify fingerprint and build two-asset manifest
-        env:
-          VERSION: vzh-ime-fingerprint-${{ github.run_number }}-${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          stage="$RUNNER_TEMP/clink-zh-fingerprint"
-          pushd "$stage"
-          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
-          python3 - <<'PY'
-          import hashlib
-          import json
-          from pathlib import Path
-
-          rows = {}
-          for raw in Path("Lexicons/zh.cime").read_text(encoding="utf-8").splitlines():
-              fields = raw.split("\t")
-              rows[fields[0]] = fields[1:]
-
-          expected = {
-              "pin": ["万象"],
-              "yin": ["验证"],
-              "pinyin": ["万象验证"],
-              "pin yin": ["万象验证"],
-          }
-          assert rows == expected, (rows, expected)
-
-          manifest = json.loads(Path("out/manifest.json").read_text(encoding="utf-8"))
-          assert [pack["code"] for pack in manifest["packs"]] == ["zh"], manifest
-          assets = manifest["packs"][0]["assets"]
-          assert [asset["path"] for asset in assets] == ["zh.cime", "zh.clex"], assets
-          assert set(Path("out/assets").iterdir()) == {
-              Path("out/assets/zh--zh.cime"),
-              Path("out/assets/zh--zh.clex"),
-          }
-
-          for path in (Path("Lexicons/zh.cime"), Path("Lexicons/zh.clex"), Path("out/manifest.json")):
-              print(path, path.stat().st_size, hashlib.sha256(path.read_bytes()).hexdigest())
-          PY
-          popd
-
-      - name: Publish fingerprint release atomically
+          python3 tools/zh_ime_probe.py build \
+            --stage "$RUNNER_TEMP/clink-zh-probe" \
+            --repository "$GITHUB_REPOSITORY" --version "$VERSION" --variant "$VARIANT"
+      - name: Save reproducible build receipt (not a language asset)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zh-probe-build-receipt
+          path: ${{ runner.temp }}/clink-zh-probe/verification.json
+      - name: Publish exactly three zh assets plus manifest
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: vzh-ime-fingerprint-${{ github.run_number }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          stage="$RUNNER_TEMP/clink-zh-fingerprint"
-
-          gh release create "$VERSION" \
-            --draft \
-            --title "Clink Community zh IME fingerprint $VERSION" \
+          stage="$RUNNER_TEMP/clink-zh-probe"
+          gh release create "$VERSION" --target "$GITHUB_SHA" --draft \
+            --title "Clink Community zh probe $VARIANT — $VERSION" \
             --notes-file FINGERPRINT_TEST.md
-
-          gh release upload "$VERSION" "$stage/out/assets/zh--zh.cime"
-          gh release upload "$VERSION" "$stage/out/assets/zh--zh.clex"
-          gh release upload "$VERSION" "$stage/out/manifest.json"
-
+          gh release upload "$VERSION" \
+            "$stage/out/assets/zh--zh.cime" \
+            "$stage/out/assets/zh--zh.clex" \
+            "$stage/out/assets/zh--zh.cngm" \
+            "$stage/out/manifest.json"
           test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = true
           gh release edit "$VERSION" --draft=false --latest
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$VERSION"
-          gh release view "$VERSION" --json url,isDraft,tagName,assets
+      - name: Re-download release and verify all discovery paths
+        run: |
+          set -euo pipefail
+          python3 tools/zh_ime_probe.py verify-release \
+            --repository "$GITHUB_REPOSITORY" --version "$VERSION" --variant "$VARIANT" \
+            --expected-manifest "$RUNNER_TEMP/clink-zh-probe/out/manifest.json"

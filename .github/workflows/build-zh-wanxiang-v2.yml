@@ -2,12 +2,8 @@ name: Build and publish Clink Chinese Wanxiang v2
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "tools/build_zh_wanxiang_v2.py"
-      - "WANXIANG_V2.md"
-      - ".github/workflows/build-zh-wanxiang-v2.yml"
+  # Legacy v2 remains manually buildable; documentation fixes must not publish
+  # zh_wx over the active zh diagnostic release.
 
 permissions:
   contents: write

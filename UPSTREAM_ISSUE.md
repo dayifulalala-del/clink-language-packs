@@ -1,151 +1,81 @@
-# Community `zh` pack installs, but Chinese Pinyin still uses the Official `zh.cime`
+# How can we verify which Community Chinese CIME is active?
 
-## Summary
+Thanks for improving the official Chinese implementation. I am testing the
+latest App version available to me, but will attach the exact version/build
+and candidate screenshots rather than rely on the word “latest”.
 
-I am trying to improve Clink's Simplified Chinese Pinyin data using a Community
-language-pack repository. A deliberately tiny `zh` fingerprint pack can be
-discovered and installed, but the keyboard does not expose any of its unique
-`.cime` candidates. Its output continues to match the Official `zh.cime`.
+I would like to contribute usable Wanxiang-derived Chinese data. Before
+reporting an App bug, we audited our own fork and found problems in our earlier
+experiment. This note **supersedes the claims in commit 4cc48bb**.
 
-This is not a request to debug the production dictionary yet. The published
-pack contains only enough data to determine which `.cime` Clink actually loads.
+## Corrections to our earlier report
 
-Could you clarify whether a Community pack with `code: "zh"` is intended to
-replace the Official `zh` pack, and how the active source is selected?
+- The old three-word fingerprint mapped one Pinyin syllable to two Hanzi and
+  two syllables to four Hanzi. The public builder accepts those rows, but we
+  have not established that the runtime composer accepts them.
+- The old test changed CLEX coverage, CIME and model presence together.
+  A negative result was not a controlled source-selection test.
+- Historical zh_wx v2 and the tiny zh fingerprint were NOT byte-equivalent.
+- We do not have recorded proof that every proposed cleanup step was performed
+  or that a specific release was active on the phone.
+- We found different release-discovery endpoints returning different tags:
+  releases/latest returned the tiny zh fingerprint, while the first item of
+  releases?per_page=1 returned zh_wx v2. Which endpoint the App uses is unknown.
+- Our own verification downloads increment asset download counts; those counts
+  do not identify iPhone downloads.
+- Therefore we cannot conclude that Community zh replacement is unsupported,
+  or that the keyboard definitely read Official assets.
 
-## Minimal public reproduction
+The earlier reported pin yin results (穦因, 拼因, etc.) resemble combinations
+of the inspected official pin/yin rows. That is a useful clue, not proof of
+the active file or of a particular segmentation algorithm.
 
-- Community repository:
-  <https://github.com/dayifulalala-del/clink-language-packs>
-- Fingerprint release:
-  <https://github.com/dayifulalala-del/clink-language-packs/releases/tag/vzh-ime-fingerprint-1-1>
-- Release manifest:
-  <https://github.com/dayifulalala-del/clink-language-packs/releases/download/vzh-ime-fingerprint-1-1/manifest.json>
-- Successful build:
-  <https://github.com/dayifulalala-del/clink-language-packs/actions/runs/34234817397>
-- Fingerprint source rows:
-  <https://github.com/dayifulalala-del/clink-language-packs/blob/dee34c36114d0c05815bd0854e40e8a637b15810/source/zh-fingerprint-ime.tsv>
-- Independent verification script:
-  <https://github.com/dayifulalala-del/clink-language-packs/blob/main/tools/verify-published-fingerprint.py>
+## New controlled test
 
-The release is the repository's latest release. Its manifest contains exactly
-one pack, with code `zh`, and exactly two assets:
+[Current test instructions](FINGERPRINT_TEST.md) and
+[full black-box plan](BLACKBOX_TEST_PLAN.md).
 
-| Logical path | Bytes | SHA-256 |
-|---|---:|---|
-| `zh.cime` | 63 | `5e05b6b2a026435b3807db8c99884626f74b6619b6dcf0336286f465e29f2500` |
-| `zh.clex` | 98 | `4f985c2b10388f06fd12af2b595beca310ee7668329119a20405e62a439749f9` |
+Both variants use code zh and the same complete Wanxiang-derived CLEX/CNGM
+pair. The only payload difference is one CIME reading:
 
-There is no `.cngm`, neural model, BPE vocabulary, emoji metadata, or copied
-Official asset in this release.
+- A: pin has the single candidate 拼.
+- B: pin has the single candidate 榀.
 
-The entire `zh.cime` is:
+Both markers have a matching Pinyin pronunciation and already exist in the
+unchanged CLEX. Every other CIME row is byte-identical, including pinyin and
+pin yin (first candidate 拼音). No official neural model is bundled.
+The release contains only the three zh resources and manifest.json.
 
-```text
-pin\t万象
-yin\t验证
-pinyin\t万象验证
-pin yin\t万象验证
-```
+The workflow verifies pinned baseline hashes, binary integrity, the matched
+model pair and all asset URLs/hashes/sizes. It explicitly sets Latest, checks
+the first release-list entry as well, then downloads and verifies the published
+files. Version/tag changes are necessary transport metadata; they do not
+change CLEX/CNGM content or unrelated CIME rows.
 
-Therefore all plausible lookup paths have an unmistakable fingerprint:
+**Device result: pending.** We will record B, then A, then B under the same
+layout, learning state and empty context. Installation status is not a pass.
+Please do not treat this document as an already-reproduced App defect.
 
-- direct lookup of `pinyin` -> `万象验证`
-- direct lookup of `pin yin` -> `万象验证`
-- dynamic composition of `pin` + `yin` -> `万象` + `验证`
+## Questions that require App-side knowledge
 
-The matching CLEX contains only `万象`, `验证`, and `万象验证`, and was built with
-the upstream `build-pack.py`. The CIME was built with the upstream
-`tools/build-ime-table.py`. The upstream validator passes.
+1. Is selecting a Community pack with code zh intended to replace the Chinese
+   IME resources of Official zh? What UI selects that source?
+2. Are installed resources keyed by code or by (repository, code)? What happens
+   when both sources provide zh?
+3. Does Pinyin dispatch require zh, or can an additional code opt in? Is there
+   metadata beyond the public release generator's code/version/assets fields?
+4. Does the composer use exact CIME readings, normalized readings, syllable
+   composition, or a mixture? Can runtime constraints reject otherwise valid
+   builder output?
+5. At what stage can CLEX frequencies, CNGM, neural prediction or learning
+   filter/reorder CIME candidates?
+6. Which release-discovery endpoint does the App use? What operation forces a
+   new manifest/asset download and keyboard-extension resource reload?
+7. Could the App expose the active repository, pack version and CIME checksum
+   in diagnostics? This would make contributions much easier to verify.
 
-Anyone can verify the published files without checking out the large production
-assets:
-
-```shell
-python3 tools/verify-published-fingerprint.py
-```
-
-## Device procedure and result
-
-The test was performed after removing the previously installed Community
-`zh_wx` experiment and attempting a clean Community `zh` installation:
-
-1. Remove installed Chinese entries, including Official Chinese, and remove the
-   old Community `zh_wx` entry.
-2. Remove `dayifulalala-del/clink-language-packs` from **General ->
-   Repositories**.
-3. Force-quit Clink and the app used for the typing test, then reopen Clink.
-4. Add the repository again.
-5. Install its Chinese entry from **Languages -> Community**, without
-   reinstalling Official Chinese.
-6. Select the Pinyin layout/current Chinese language and type into a fresh plain
-   text field.
-7. Test `pinyin` and `pin yin` without accepting or teaching candidates.
-
-Expected first candidate for both inputs: `万象验证`.
-
-Observed: the fingerprint does not appear and the candidate behaviour remains
-the same as the old Official Chinese data. In particular, `pin yin` continues to
-produce candidates such as `穦因` and `拼因` instead of `万象验证`.
-
-This output is a strong fingerprint of the Official table itself: its `pin` row
-begins with `穦`, `拼`, `品`, and its `yin` row begins with `因`, `音`, while it
-has no exact `pinyin` or `pin yin` row. `穦因` is therefore consistent with the
-App segmenting the input and composing the first Official candidates.
-
-An earlier byte-equivalent approach under the independent code `zh_wx` was also
-discoverable/installable but did not change Pinyin candidates. Because the
-public manifest has no `inputMethod`, `pinyin`, `locale`, `profile`, or `layout`
-field, this suggests that IME dispatch is determined elsewhere in the App.
-
-## What the public repositories establish
-
-The public language-pack tooling establishes that:
-
-- `.clex` is required and `.cime` is the optional reading-to-character table
-  used for an IME language.
-- Community packs are displayed separately from Official packs.
-- downloads are staged and the previous verified pack remains active if a new
-  pack cannot be activated.
-- the release manifest identifies a pack by `code`, `version`, and `assets`, but
-  exposes no IME type or source-selection metadata.
-- profile, layout, index, and localization repositories expose no mapping that
-  can declare `zh_wx` to be a Chinese Pinyin IME.
-
-I could not find a public Clink iOS core repository. I therefore do not want to
-present same-code priority, cache keys, install paths, or IME dispatch as known
-facts.
-
-Full public-repository investigation:
-<https://github.com/dayifulalala-del/clink-language-packs/blob/main/CLINK_IME_INVESTIGATION.md>
-
-## Questions for the App implementation
-
-1. Is a Community language pack with `code: "zh"` supported as a replacement
-   for the Official `zh` pack, or are Community packs intended only to add codes
-   that are not already Official?
-2. Are installed language resources keyed only by language code, or by
-   `(repository, code)`? If both Official and Community provide `zh`, which one
-   is used by the keyboard extension?
-3. Is Chinese Pinyin activation hard-coded to `zh`, or is there another private
-   locale/input-method mapping? Can a code such as `zh_wx` ever opt into Pinyin?
-4. Does the Chinese composer read the `.cime` from the selected downloaded
-   language pack, or from a distinct Official/bundled location?
-5. What is the supported way to evict the previous verified Official `zh`
-   assets and force the keyboard extension to reopen newly installed Community
-   assets?
-6. Can `.clex`, `.cngm`, a neural model, or learned vocabulary suppress or
-   reorder an exact `.cime` candidate, even when the installed pack contains no
-   model files?
-7. Does `pin yin` perform an exact lookup, whitespace normalization, syllable
-   lookup plus composition, or a mixture of those paths?
-
-If same-code replacement is not currently supported, documenting that limitation
-would prevent Community authors from treating a successful install as an IME
-activation. A source selector, a documented override rule, or manifest metadata
-for input-method type would make this use case testable.
-
-The intended production data is derived from Rime Wanxiang under CC BY 4.0, but
-I have intentionally stopped before publishing a production v3. I will not tune
-candidate frequencies until this minimal fingerprint proves which `.cime` is
-actually active.
+We found public resource tooling and documentation, but no public iOS core
+implementation. We are asking about the supported contract rather than
+asserting private loading behavior. The planned production data is derived
+from Rime Wanxiang by amzxyz and contributors under CC BY 4.0; production v3
+remains gated on device evidence.

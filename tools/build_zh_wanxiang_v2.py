@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """Build a standalone Clink Chinese Wanxiang community pack source set.
 
-This v2 deliberately uses a distinct language code (default: zh_wx) so Clink
-cannot silently fall back to or collide with the official `zh` pack.
+This historical v2 uses a distinct language code (default: zh_wx). Whether the
+App enables Chinese Pinyin for that code is unknown; a distinct filename does
+not prove IME dispatch or prevent an App-side fallback.
 
 Outputs:
   source/<code>.txt       weighted Clink lexicon source
@@ -174,9 +175,8 @@ def main():
     seen = 0
 
     for path in args.inputs:
-        if not path.exists():
-            print(f'WARNING: missing input {path}')
-            continue
+        if not path.is_file():
+            raise SystemExit(f'Required input not found: {path}')
         print(f'Reading {path} ...')
         for word, raw_reading, weight, _lineno in parse_rime(path):
             if not cjk_only(word):

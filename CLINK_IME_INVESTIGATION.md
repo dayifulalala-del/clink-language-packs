@@ -1,5 +1,12 @@
 # Clink Community 中文 IME 公开实现调查
 
+> **2026-09-09 更正：** 下面保留早期调查背景；涉及旧三词指纹的充分性和手机清理状态的
+> 断言已撤回。旧实验同时改变多项资源，且使用音节与字数不一致的映射，阴性结果不能
+> 证明官方文件仍活跃。`zh_wx` 硬编码问题仍未知。GitHub `releases/latest` 和列表首项曾
+> 返回不同 tag，显式设 Latest 也不足以消除分发歧义。现行协议、证据边界与复测步骤以
+> [FINGERPRINT_TEST.md](FINGERPRINT_TEST.md)、[BLACKBOX_TEST_PLAN.md](BLACKBOX_TEST_PLAN.md)
+> 和修订后的 [UPSTREAM_ISSUE.md](UPSTREAM_ISSUE.md) 为准。
+
 调查日期：2026-09-08。本文只把公开代码和公开产品说明当作事实；没有公开实现支持的
 结论都标为推断或待实机验证。
 
@@ -105,9 +112,9 @@ yin  -> 因, 音, 印, ...
 ### `pin yin` 和连续 `pinyin`
 
 实机出现 `穦因`，恰好是官方 `pin` 行第一候选 `穦` 加 `yin` 行第一候选 `因`。
-而官方表中没有 `pin yin` 整行。这强烈支持：
+而所检查的官方表中没有 `pin yin` 整行。这与以下假设相容，但没有证明：
 
-- 带空格输入至少能按音节分段，然后组合每段的 `.cime` 候选。
+- 带空格输入可能按音节分段，然后组合每段的 `.cime` 候选。
 - “每个 reading 保留候选顺序”与“多音节整句看起来被重排”并不矛盾：前者只描述单行，
   后者可能是多行的动态组合。
 
@@ -116,7 +123,7 @@ yin  -> 因, 音, 印, ...
 
 ### 为什么 `zh_wx` 安装后不变
 
-强推断，不是公开代码事实：Clink 的 Pinyin 组合器或 Pinyin layout 映射识别已知语言代码
+待验证假设，不是公开代码事实：Clink 的 Pinyin 组合器或 Pinyin layout 映射识别已知语言代码
 `zh`，而 `zh_wx` 只是一个可下载的普通字典代码。证据是：
 
 - manifest 没有其它字段能把 `zh_wx` 声明为 Pinyin。
@@ -131,7 +138,8 @@ yin  -> 因, 音, 印, ...
 - v2 发布后成为该仓库的 latest Release，其 manifest 只有 `zh_wx`。如果 Clink 只发现 latest
   Release manifest，新安装时就不会再发现旧 Release 里的 v1 `zh`。公开 App 代码不存在，
   所以“只读 latest”仍是根据文档和所有 Release workflow 的强推断。
-- 新的 fingerprint Release 显式设为 latest，并只含 `zh.clex + zh.cime`，从而同时消除上述两个混淆。
+- 旧 fingerprint Release 显式设为 latest，只有 `zh.clex + zh.cime`；但后续发现列表首项
+  仍为另一版本，所以不能说已经消除了分发混淆。其三词 CLEX 本身也新增了兼容性变量。
 
 ## 仍必须由 iPhone 回答的问题
 
@@ -141,8 +149,8 @@ yin  -> 因, 音, 印, ...
 4. 连续拼音、空格分节、模糊拼音的具体 lookup 路径。
 5. CLEX 词频、CNGM、neural model 和个性化学习是否及何时重排 CIME 候选。
 
-首轮唯一通过标准是：在 iPhone 上选中 Community `zh` 后，`pinyin` 和 `pin yin` 都将
-`万象验证` 显示为第一候选。在这个结果出现以前，不进入正式万象 v3。
+当前采用保留完整词典的合法一音节 A/B 指纹，见 FINGERPRINT_TEST.md；在实机候选随
+Community CIME 受控变化以前，不进入正式万象 v3。旧“万象验证”协议不再用作加载判据。
 
 ## 主要公开来源
 

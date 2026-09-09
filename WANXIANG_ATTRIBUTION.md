@@ -5,11 +5,15 @@
 - 上游项目：https://github.com/amzxyz/rime-wanxiang
 - 使用分支：`wanxiang`
 - 固定数据版本：`669d3af7a53a3ec0fd268a82bbeb0b0f948ae944`
-- 使用文件：`dicts/jichu.dict.yaml`、`dicts/zi.dict.yaml`、`dicts/chengyu.dict.yaml`
+- 实际使用文件：`dicts/jichu.dict.yaml`、`dicts/zi.dict.yaml`
 - 万象数据许可：Creative Commons Attribution 4.0 International (CC BY 4.0)
 - 许可文本：https://creativecommons.org/licenses/by/4.0/
 
 构建流程固定到上述提交，以保证每次发布都使用同一份可复现的数据源。
+
+更正：旧 workflow 还列出了该提交不存在的 `dicts/chengyu.dict.yaml`，旧转换器警告后继续，
+所以旧 Release 并未使用这个文件。现在已移除无效路径，并将指定输入缺失改成构建失败。
+本文件描述历史 v1；当前诊断包的 v2 数据来源见 `FINGERPRINT_TEST.md`。
 
 ## 做了哪些修改
 

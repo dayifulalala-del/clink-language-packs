@@ -64,11 +64,12 @@ def iter_input_files(paths: list[Path]):
     for path in paths:
         if path.is_dir():
             files = sorted(path.rglob("*.dict.yaml"))
+            if not files:
+                raise SystemExit(f"No *.dict.yaml inputs found in: {path}")
         elif path.is_file():
             files = [path]
         else:
-            print(f"WARNING: not found: {path}", file=sys.stderr)
-            continue
+            raise SystemExit(f"Required input not found: {path}")
         for file in files:
             key = file.resolve()
             if key not in seen:

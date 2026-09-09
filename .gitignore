@@ -1,6 +1,7 @@
 ._*
 .DS_Store
 .venv/
+__pycache__/
 tools/.lm_*.pt
 tools/.lm_build/
 source/*.txt

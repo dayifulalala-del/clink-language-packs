@@ -2,12 +2,8 @@ name: Build and publish Chinese Wanxiang pack
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "tools/rime_to_clink.py"
-      - "WANXIANG_ATTRIBUTION.md"
-      - ".github/workflows/build-zh-wanxiang.yml"
+  # Legacy v1 remains manually buildable; documentation fixes must not replace
+  # the active diagnostic release.
 
 permissions:
   contents: write
@@ -43,7 +39,6 @@ jobs:
           python3 tools/rime_to_clink.py \
             _wanxiang/dicts/jichu.dict.yaml \
             _wanxiang/dicts/zi.dict.yaml \
-            _wanxiang/dicts/chengyu.dict.yaml \
             --seed-cime Lexicons/zh.cime \
             --out-dir source \
             --max-candidates 16 \
