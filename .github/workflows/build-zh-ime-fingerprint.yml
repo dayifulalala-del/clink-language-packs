@@ -63,7 +63,7 @@ jobs:
             "$stage/out/assets/zh--zh.cngm" \
             "$stage/out/manifest.json"
           test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = true
-          gh release edit "$VERSION" --draft=false --latest
+          gh release edit "$VERSION" --draft=false --prerelease
       - name: Re-download release and verify all discovery paths
         run: |
           set -euo pipefail
