@@ -1,0 +1,243 @@
+name: Build and publish Clink Chinese Wanxiang v3 nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "tools/build_zh_wanxiang_v3.py"
+      - "WANXIANG_V3.md"
+      - ".github/workflows/build-zh-wanxiang-v3.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clink-zh-wanxiang-v3
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      VERSION: vzh-wanxiang-v3-${{ github.run_number }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out Clink language pack fork
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Resolve and download current Wanxiang dict-nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _wanxiang_release _wanxiang_dicts
+          mkdir -p _wanxiang_release _wanxiang_dicts
+
+          gh api repos/amzxyz/rime-wanxiang/releases/tags/dict-nightly > _wanxiang_release/release.json
+          gh release download dict-nightly \
+            --repo amzxyz/rime-wanxiang \
+            --pattern base-dicts.zip \
+            --dir _wanxiang_release
+
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          root = Path('_wanxiang_release')
+          release = json.loads((root / 'release.json').read_text(encoding='utf-8'))
+          assets = {a['name']: a for a in release['assets']}
+          asset = assets.get('base-dicts.zip')
+          if not asset:
+              raise SystemExit('dict-nightly does not contain base-dicts.zip')
+          data = (root / 'base-dicts.zip').read_bytes()
+          actual = 'sha256:' + hashlib.sha256(data).hexdigest()
+          expected = asset.get('digest')
+          print('Wanxiang release id:', release['id'])
+          print('Wanxiang published:', release.get('published_at'))
+          print('base-dicts.zip:', len(data), 'bytes')
+          print('asset digest:', expected)
+          print('local digest:', actual)
+          if expected and expected != actual:
+              raise SystemExit(f'asset digest mismatch: expected {expected}, got {actual}')
+          PY
+
+          unzip -q _wanxiang_release/base-dicts.zip -d _wanxiang_dicts
+          find _wanxiang_dicts -type f -name '*.dict.yaml' -maxdepth 5 | sort | sed -n '1,80p'
+
+      - name: Build production zh sources from complete standard Wanxiang tables
+        run: |
+          set -euo pipefail
+          rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm Lexicons/zh.bpevocab Lexicons/zh.mlmodelc
+          python3 tools/build_zh_wanxiang_v3.py \
+            --dict-root _wanxiang_dicts \
+            --code zh \
+            --out-dir source \
+            --lexicon-limit 600000 \
+            --max-ime-readings 400000 \
+            --max-candidates 16 \
+            --max-word-length 16 \
+            --max-following 64 \
+            --single-char-ime-min-weight 1 \
+            --receipt-json source/zh-wanxiang-build.json
+
+      - name: Build CLEX and CIME with Clink official tools
+        run: |
+          set -euo pipefail
+          python3 build-pack.py zh source/zh.txt
+          python3 tools/build-ime-table.py zh source/zh-ime.tsv
+          python3 tools/validate-pack.py zh
+          ls -lh Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm
+          wc -l Lexicons/zh.cime
+
+      - name: Production regression and fingerprint-removal tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          rows = {}
+          for raw in Path('Lexicons/zh.cime').read_text(encoding='utf-8').splitlines():
+              fields = raw.split('\t')
+              if len(fields) >= 2:
+                  rows[fields[0]] = fields[1:]
+
+          expected = {
+              'pinyin':'拼音', 'pin yin':'拼音',
+              'nihao':'你好', 'ni hao':'你好',
+              'meiyou':'没有', 'mei you':'没有',
+              'zenme':'怎么', 'zen me':'怎么',
+              'zenmehuishi':'怎么回事', 'zen me hui shi':'怎么回事',
+              'weishenme':'为什么', 'wei shen me':'为什么',
+              'buzhidao':'不知道', 'bu zhi dao':'不知道',
+              'keyi':'可以', 'ke yi':'可以',
+              'xianzai':'现在', 'xian zai':'现在',
+              'jintian':'今天', 'jin tian':'今天',
+              'mingtian':'明天', 'ming tian':'明天',
+              'zhongwen':'中文', 'zhong wen':'中文',
+              'shurufa':'输入法', 'shu ru fa':'输入法',
+              'suoyi':'所以', 'suo yi':'所以',
+          }
+          failed = []
+          for key, want in expected.items():
+              got = rows.get(key, [])
+              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
+              if not got or got[0] != want:
+                  failed.append((key, want, got[:5]))
+
+          pin = rows.get('pin', [])
+          print('pin =>', ' / '.join(pin[:16]))
+          if '穦' in pin[:5]:
+              failed.append(('pin', '穦 must not be top-5', pin[:5]))
+
+          markers = {'万象验证甲','万象验证乙','万象验证丙'}
+          leaked = sorted(markers & {w for values in rows.values() for w in values})
+          if leaked:
+              failed.append(('fingerprint leak', leaked))
+
+          if len(rows) < 100000:
+              failed.append(('IME table unexpectedly small', len(rows)))
+          if failed:
+              raise SystemExit('Production regression failure: ' + repr(failed))
+          print('IME readings:', len(rows))
+          PY
+
+      - name: Create reproducible Wanxiang source receipt
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          release = json.loads(Path('_wanxiang_release/release.json').read_text(encoding='utf-8'))
+          build = json.loads(Path('source/zh-wanxiang-build.json').read_text(encoding='utf-8'))
+          asset = next(a for a in release['assets'] if a['name'] == 'base-dicts.zip')
+          receipt = {
+              'upstream': 'amzxyz/rime-wanxiang',
+              'tag': 'dict-nightly',
+              'releaseId': release['id'],
+              'publishedAt': release.get('published_at'),
+              'targetCommitish': release.get('target_commitish'),
+              'asset': {
+                  'name': asset['name'],
+                  'byteCount': asset['size'],
+                  'sha256': asset.get('digest'),
+                  'url': asset['browser_download_url'],
+              },
+              'build': build,
+          }
+          Path('wanxiang-source.json').write_text(
+              json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(json.dumps({
+              'releaseId': receipt['releaseId'],
+              'publishedAt': receipt['publishedAt'],
+              'assetSha256': receipt['asset']['sha256'],
+              'tables': [x['name'] for x in build['standardTables']],
+              'limits': build['limits'],
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Build manifest containing only production zh
+        run: |
+          set -euo pipefail
+          find Lexicons -mindepth 1 -maxdepth 1 \
+            ! -name 'zh.clex' \
+            ! -name 'zh.cime' \
+            ! -name 'zh.cngm' \
+            -exec rm -rf {} +
+
+          rm -rf out
+          mkdir -p out
+          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
+          assert [p['code'] for p in m['packs']] == ['zh'], m
+          assets = {a['path'] for a in m['packs'][0]['assets']}
+          assert assets == {'zh.cime','zh.clex','zh.cngm'}, assets
+          print('Manifest code: zh')
+          print('Manifest assets:', sorted(assets))
+          PY
+
+      - name: Publish verified production Release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --title "Clink 中文万象 v3 dict-nightly — $VERSION" \
+            --notes-file WANXIANG_V3.md
+
+          gh release upload "$VERSION" \
+            out/assets/zh--zh.cime \
+            out/assets/zh--zh.clex \
+            out/assets/zh--zh.cngm \
+            out/manifest.json \
+            wanxiang-source.json
+
+          test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = true
+          gh release edit "$VERSION" --draft=false --latest
+
+      - name: Re-download published manifest and verify latest Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/release-check"
+          mkdir -p "$RUNNER_TEMP/release-check"
+          gh release download "$VERSION" --dir "$RUNNER_TEMP/release-check"
+          cmp out/manifest.json "$RUNNER_TEMP/release-check/manifest.json"
+          cmp wanxiang-source.json "$RUNNER_TEMP/release-check/wanxiang-source.json"
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          test "$latest" = "$VERSION"
+          echo "Verified latest release: $latest"
