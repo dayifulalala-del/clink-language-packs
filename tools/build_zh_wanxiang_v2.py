@@ -84,6 +84,36 @@ def parse_rime(path: Path):
             yield word, reading, weight, lineno
 
 
+def parse_latin_terms(path: Path):
+    """Yield (display, lexicon_word, weight, aliases) from a small curated TSV.
+
+    Format: display<TAB>weight<TAB>alias1,alias2,...
+    The lexicon form is lowercased for CLEX stability; CIME keeps display casing.
+    """
+    for lineno, raw in enumerate(path.read_text(encoding='utf-8-sig', errors='replace').splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        fields = raw.split('\t')
+        display = unicodedata.normalize('NFC', fields[0].strip())
+        if not display or any(ch.isspace() for ch in display):
+            raise SystemExit(f'{path}:{lineno}: Latin display term must be one token: {display!r}')
+        weight = parse_weight(fields[1]) if len(fields) > 1 and fields[1].strip() else 100000.0
+        aliases_raw = fields[2] if len(fields) > 2 else display
+        aliases = []
+        for alias in re.split(r'[,;\s]+', aliases_raw.strip()):
+            alias = unicodedata.normalize('NFC', alias).lower()
+            alias = re.sub(r'[^a-z0-9]+', '', alias)
+            if alias and alias not in aliases:
+                aliases.append(alias)
+        exact = re.sub(r'[^a-z0-9]+', '', display.lower())
+        if exact and exact not in aliases:
+            aliases.insert(0, exact)
+        if not aliases:
+            raise SystemExit(f'{path}:{lineno}: no usable aliases for {display!r}')
+        yield display, display.lower(), weight, aliases
+
+
 def word_score(word: str, weight: float) -> float:
     # Strongly suppress rare/supplementary single characters without deleting
     # useful rare words entirely. This is specifically meant to stop junk such
@@ -166,12 +196,18 @@ def main():
     ap.add_argument('--max-word-length', type=int, default=12)
     ap.add_argument('--max-following', type=int, default=48)
     ap.add_argument('--single-char-ime-min-weight', type=float, default=200.0)
+    ap.add_argument('--latin-terms', type=Path,
+                    help='Optional curated Latin/brand terms TSV for mixed Chinese-English input.')
     args = ap.parse_args()
 
     # word -> best raw frequency
     freqs: dict[str,float] = {}
     # reading -> candidate -> (score, raw weight, first seen)
     readings: dict[str, dict[str, tuple[float,float,int]]] = collections.defaultdict(dict)
+    # CIME display candidate -> normalized CLEX token. Chinese maps to itself;
+    # Latin brands can keep display casing while CLEX remains lowercase.
+    candidate_lexicon: dict[str, str] = {}
+    latin_aliases: set[str] = set()
     seen = 0
 
     for path in args.inputs:
@@ -200,6 +236,21 @@ def main():
                 if old is None or score > old[0]:
                     readings[key][word] = (score, weight, old[2] if old else seen)
 
+    if args.latin_terms:
+        if not args.latin_terms.is_file():
+            raise SystemExit(f'Latin terms file not found: {args.latin_terms}')
+        print(f'Reading curated Latin terms {args.latin_terms} ...')
+        for display, lexicon_word, weight, aliases in parse_latin_terms(args.latin_terms):
+            seen += 1
+            freqs[lexicon_word] = max(freqs.get(lexicon_word, 0.0), weight)
+            candidate_lexicon[display] = lexicon_word
+            for alias in aliases:
+                latin_aliases.add(alias)
+                old = readings[alias].get(display)
+                score = weight * 10.0
+                if old is None or score > old[0]:
+                    readings[alias][display] = (score, weight, old[2] if old else seen)
+
     if not freqs:
         raise SystemExit('No usable Wanxiang entries were parsed.')
 
@@ -222,6 +273,7 @@ def main():
         'mingtian', 'ming tian', 'zhongwen', 'zhong wen',
         'shurufa', 'shu ru fa',
     }
+    protected.update(latin_aliases)
     reading_order = sorted(
         readings,
         key=lambda r: (
@@ -242,14 +294,14 @@ def main():
         top = [w for w,_ in ranked[:args.max_candidates]]
         if top:
             ime_rows[reading] = top
-            keep.update(top)
+            keep.update(candidate_lexicon.get(w, w) for w in top)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     lex_path = args.out_dir / f'{args.code}.txt'
     ime_path = args.out_dir / f'{args.code}-ime.tsv'
 
     with lex_path.open('w', encoding='utf-8', newline='\n') as f:
-        f.write('# word<TAB>frequency — Wanxiang-derived Clink v2\n')
+        f.write('# word<TAB>frequency — Wanxiang-derived Clink data\n')
         for word in sorted(keep, key=lambda w: (-freqs.get(w,1.0), w)):
             f.write(f'{word}\t{freqs.get(word,1.0):g}\n')
 
