@@ -10,6 +10,7 @@ on:
       - "tools/build_zh_wanxiang_v3.py"
       - "tools/build_zh_wanxiang_v2.py"
       - "source/zh-latin-terms.tsv"
+      - "source/zh-domain-terms.tsv"
       - "WANXIANG_V3.md"
       - ".github/workflows/build-zh-wanxiang-v3.yml"
 
@@ -83,13 +84,17 @@ jobs:
             --dict-root _wanxiang_dicts \
             --code zh \
             --out-dir source \
-            --lexicon-limit 600000 \
-            --max-ime-readings 400000 \
+            --lexicon-limit 650000 \
+            --max-ime-readings 500000 \
             --max-candidates 16 \
             --max-word-length 16 \
             --max-following 64 \
             --single-char-ime-min-weight 1 \
             --latin-terms source/zh-latin-terms.tsv \
+            --custom-terms source/zh-domain-terms.tsv \
+            --english-limit 20000 \
+            --english-typo-limit 2500 \
+            --jianpin-limit 50000 \
             --receipt-json source/zh-wanxiang-build.json
 
       - name: Build CLEX and CIME with Clink official tools
@@ -135,6 +140,10 @@ jobs:
               'docker':'Docker', 'doker':'Docker',
               'python':'Python', 'pyhton':'Python',
               'xcode':'Xcode',
+              'computer':'computer',
+              'compuer':'computer',
+              'ruanluyou':'软路由',
+              'yyds':'YYDS',
           }
           failed = []
           for key, want in expected.items():
@@ -148,13 +157,28 @@ jobs:
           if '穦' in pin[:5]:
               failed.append(('pin', '穦 must not be top-5', pin[:5]))
 
+          contains = {
+              'bzd':'不知道',
+              'wsm':'为什么',
+              'zmhs':'怎么回事',
+              'zmh':'怎么回事',
+              'maopeifang':'毛坯房',
+              'githubcangku':'Github仓库',
+              'heilongjiang':'黑龙江',
+          }
+          for key, want in contains.items():
+              got = rows.get(key, [])
+              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
+              if want not in got[:8]:
+                  failed.append((key, f'{want} must be in top-8', got[:8]))
+
           markers = {'万象验证甲','万象验证乙','万象验证丙'}
           leaked = sorted(markers & {w for values in rows.values() for w in values})
           if leaked:
               failed.append(('fingerprint leak', leaked))
 
           lex_source = Path('source/zh.txt').read_text(encoding='utf-8')
-          for word in ('github', 'chatgpt', 'codex', 'openai', 'iphone', 'docker', 'python', 'xcode'):
+          for word in ('github', 'chatgpt', 'codex', 'openai', 'iphone', 'docker', 'python', 'xcode', 'computer', 'server', 'network'):
               if not any(line.split('\t', 1)[0] == word for line in lex_source.splitlines() if line and not line.startswith('#')):
                   failed.append(('CLEX source missing Latin term', word))
 
