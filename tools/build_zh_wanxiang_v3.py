@@ -34,6 +34,13 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def locate_one(root: Path, filename: str) -> Path:
+    matches = list(root.rglob(filename))
+    if len(matches) != 1:
+        raise SystemExit(f"Expected exactly one {filename} under {root}; found {len(matches)}")
+    return matches[0]
+
+
 def locate(root: Path) -> list[tuple[str, Path]]:
     by_name: dict[str, Path] = {}
     for path in root.rglob("*.dict.yaml"):
@@ -65,11 +72,17 @@ def main() -> None:
     p.add_argument("--max-following", type=int, default=64)
     p.add_argument("--single-char-ime-min-weight", type=float, default=1.0)
     p.add_argument("--latin-terms", type=Path, default=Path("source/zh-latin-terms.tsv"))
+    p.add_argument("--custom-terms", type=Path, default=Path("source/zh-domain-terms.tsv"))
+    p.add_argument("--english-limit", type=int, default=20000)
+    p.add_argument("--english-typo-limit", type=int, default=2500)
+    p.add_argument("--jianpin-limit", type=int, default=50000)
     p.add_argument("--receipt-json", type=Path)
     args = p.parse_args()
 
     table_items = locate(args.dict_root)
     tables = [path for _name, path in table_items]
+    english_dict = locate_one(args.dict_root, "en.dict.yaml")
+    mixed_dict = locate_one(args.dict_root, "mixed.dict.yaml")
     delegate = Path(__file__).with_name("build_zh_wanxiang_v2.py")
     if not delegate.is_file():
         raise SystemExit(f"Missing delegate builder: {delegate}")
@@ -84,11 +97,20 @@ def main() -> None:
         "--max-word-length", str(args.max_word_length),
         "--max-following", str(args.max_following),
         "--single-char-ime-min-weight", str(args.single_char_ime_min_weight),
+        "--english-dict", str(english_dict),
+        "--english-limit", str(args.english_limit),
+        "--english-typo-limit", str(args.english_typo_limit),
+        "--mixed-dict", str(mixed_dict),
+        "--jianpin-limit", str(args.jianpin_limit),
     ]
     if args.latin_terms:
         if not args.latin_terms.is_file():
             raise SystemExit(f"Missing curated Latin terms file: {args.latin_terms}")
         command += ["--latin-terms", str(args.latin_terms)]
+    if args.custom_terms:
+        if not args.custom_terms.is_file():
+            raise SystemExit(f"Missing custom terms file: {args.custom_terms}")
+        command += ["--custom-terms", str(args.custom_terms)]
     subprocess.run(command, check=True)
 
     ime = args.out_dir / f"{args.code}-ime.tsv"
@@ -102,11 +124,30 @@ def main() -> None:
             "builderVersion": 3,
             "code": args.code,
             "delegate": delegate.name,
+            "nightlyAuxiliaryTables": [
+                {
+                    "name": "en",
+                    "path": str(english_dict),
+                    "sha256": sha256(english_dict),
+                    "byteCount": english_dict.stat().st_size,
+                },
+                {
+                    "name": "mixed",
+                    "path": str(mixed_dict),
+                    "sha256": sha256(mixed_dict),
+                    "byteCount": mixed_dict.stat().st_size,
+                },
+            ],
             "latinTerms": ({
                 "path": str(args.latin_terms),
                 "sha256": sha256(args.latin_terms),
                 "byteCount": args.latin_terms.stat().st_size,
             } if args.latin_terms else None),
+            "customTerms": ({
+                "path": str(args.custom_terms),
+                "sha256": sha256(args.custom_terms),
+                "byteCount": args.custom_terms.stat().st_size,
+            } if args.custom_terms else None),
             "standardTables": [
                 {
                     "name": name,
@@ -123,6 +164,9 @@ def main() -> None:
                 "maxWordLength": args.max_word_length,
                 "maxFollowing": args.max_following,
                 "singleCharImeMinWeight": args.single_char_ime_min_weight,
+                "englishLimit": args.english_limit,
+                "englishTypoLimit": args.english_typo_limit,
+                "jianpinLimit": args.jianpin_limit,
             },
         }
         args.receipt_json.parent.mkdir(parents=True, exist_ok=True)
