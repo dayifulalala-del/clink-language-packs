@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """Production wrapper for Clink Chinese Wanxiang dict-nightly builds.
 
-It discovers exactly the standard tables imported by Wanxiang's base
-wanxiang.dict.yaml, then delegates normalization/ranking/CNGM generation to the
+It discovers the Chinese tables actually present in Wanxiang's rolling
+base-dicts.zip, requires the core zi/jichu/lianxiang tables, excludes non-Chinese
+auxiliary tables, then delegates normalization/ranking/CNGM generation to the
 already-tested v2 converter while switching the production language code to zh.
 """
 from __future__ import annotations
@@ -15,11 +16,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-STANDARD_TABLES = [
+PREFERRED_TABLES = [
     "zi", "jichu", "lianxiang", "cuoyin", "duoyin", "shici", "diming",
     "yixue", "huaxue", "yaopin", "mingren", "yiren", "wuzhong",
     "renming", "taifeng", "fangyan",
 ]
+CORE_TABLES = {"zi", "jichu", "lianxiang"}
+EXCLUDED_TABLES = {"abbrev", "t9_abbrev", "en", "mixed"}
 FINGERPRINT_MARKERS = {"万象验证甲", "万象验证乙", "万象验证丙"}
 
 
@@ -31,16 +34,23 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def locate(root: Path) -> list[Path]:
-    result = []
-    for name in STANDARD_TABLES:
-        matches = list(root.rglob(f"{name}.dict.yaml"))
-        if len(matches) != 1:
-            raise SystemExit(
-                f"Expected exactly one {name}.dict.yaml under {root}; found {len(matches)}"
-            )
-        result.append(matches[0])
-    return result
+def locate(root: Path) -> list[tuple[str, Path]]:
+    by_name: dict[str, Path] = {}
+    for path in root.rglob("*.dict.yaml"):
+        name = path.name.removesuffix(".dict.yaml")
+        if name in EXCLUDED_TABLES:
+            continue
+        if name in by_name:
+            raise SystemExit(f"Duplicate {name}.dict.yaml under {root}")
+        by_name[name] = path
+
+    missing_core = sorted(CORE_TABLES - set(by_name))
+    if missing_core:
+        raise SystemExit(f"dict-nightly base asset is missing core tables: {missing_core}")
+
+    ordered_names = [name for name in PREFERRED_TABLES if name in by_name]
+    ordered_names += sorted(set(by_name) - set(ordered_names))
+    return [(name, by_name[name]) for name in ordered_names]
 
 
 def main() -> None:
@@ -57,7 +67,8 @@ def main() -> None:
     p.add_argument("--receipt-json", type=Path)
     args = p.parse_args()
 
-    tables = locate(args.dict_root)
+    table_items = locate(args.dict_root)
+    tables = [path for _name, path in table_items]
     delegate = Path(__file__).with_name("build_zh_wanxiang_v2.py")
     if not delegate.is_file():
         raise SystemExit(f"Missing delegate builder: {delegate}")
@@ -93,7 +104,7 @@ def main() -> None:
                     "sha256": sha256(path),
                     "byteCount": path.stat().st_size,
                 }
-                for name, path in zip(STANDARD_TABLES, tables)
+                for name, path in table_items
             ],
             "limits": {
                 "lexiconLimit": args.lexicon_limit,
@@ -109,7 +120,7 @@ def main() -> None:
             json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-    print("Production tables:", ", ".join(STANDARD_TABLES))
+    print("Production tables:", ", ".join(name for name, _path in table_items))
     print("IME TSV bytes:", ime.stat().st_size)
 
 
