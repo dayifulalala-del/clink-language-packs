@@ -8,6 +8,8 @@ on:
     branches: [main]
     paths:
       - "tools/build_zh_wanxiang_v3.py"
+      - "tools/build_zh_wanxiang_v2.py"
+      - "source/zh-latin-terms.tsv"
       - "WANXIANG_V3.md"
       - ".github/workflows/build-zh-wanxiang-v3.yml"
 
@@ -87,6 +89,7 @@ jobs:
             --max-word-length 16 \
             --max-following 64 \
             --single-char-ime-min-weight 1 \
+            --latin-terms source/zh-latin-terms.tsv \
             --receipt-json source/zh-wanxiang-build.json
 
       - name: Build CLEX and CIME with Clink official tools
@@ -124,6 +127,14 @@ jobs:
               'zhongwen':'中文', 'zhong wen':'中文',
               'shurufa':'输入法', 'shu ru fa':'输入法',
               'suoyi':'所以', 'suo yi':'所以',
+              'github':'GitHub', 'githbu':'GitHub',
+              'chatgpt':'ChatGPT', 'chatgtp':'ChatGPT',
+              'codex':'Codex', 'codxe':'Codex',
+              'openai':'OpenAI',
+              'iphone':'iPhone',
+              'docker':'Docker', 'doker':'Docker',
+              'python':'Python', 'pyhton':'Python',
+              'xcode':'Xcode',
           }
           failed = []
           for key, want in expected.items():
@@ -141,6 +152,11 @@ jobs:
           leaked = sorted(markers & {w for values in rows.values() for w in values})
           if leaked:
               failed.append(('fingerprint leak', leaked))
+
+          lex_source = Path('source/zh.txt').read_text(encoding='utf-8')
+          for word in ('github', 'chatgpt', 'codex', 'openai', 'iphone', 'docker', 'python', 'xcode'):
+              if not any(line.split('\t', 1)[0] == word for line in lex_source.splitlines() if line and not line.startswith('#')):
+                  failed.append(('CLEX source missing Latin term', word))
 
           if len(rows) < 100000:
               failed.append(('IME table unexpectedly small', len(rows)))
