@@ -121,6 +121,7 @@ jobs:
           PY
 
           gh release create "$VERSION" \
+            --prerelease \
             --title "Clink 中文万象 v2 $VERSION" \
             --notes-file WANXIANG_V2.md \
             out/manifest.json \
