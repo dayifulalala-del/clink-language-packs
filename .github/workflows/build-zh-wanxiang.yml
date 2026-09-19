@@ -126,5 +126,5 @@ jobs:
           upload out/manifest.json
 
           test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = true
-          gh release edit "$VERSION" --draft=false
+          gh release edit "$VERSION" --draft=false --prerelease
           echo "Published $VERSION"
