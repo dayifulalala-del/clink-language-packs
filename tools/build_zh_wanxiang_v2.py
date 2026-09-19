@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Build a standalone Clink Chinese Wanxiang community pack source set.
+"""Build Clink Chinese Wanxiang sources.
 
-This historical v2 uses a distinct language code (default: zh_wx). Whether the
-App enables Chinese Pinyin for that code is unknown; a distinct filename does
-not prove IME dispatch or prevent an App-side fallback.
+Historical v2 used this file for zh_wx. The production v3 wrapper now reuses
+the same converter with code=zh and enables extra mixed-input features.
 
 Outputs:
   source/<code>.txt       weighted Clink lexicon source
-  source/<code>-ime.tsv   Pinyin -> candidate table (compact + spaced readings)
-  Lexicons/<code>.cngm    weighted Chinese next-token model derived from phrases
-
-Then run Clink's official builders:
-  python3 build-pack.py <code> source/<code>.txt
-  python3 tools/build-ime-table.py <code> source/<code>-ime.tsv
+  source/<code>-ime.tsv   reading -> ordered candidates
+  Lexicons/<code>.cngm    weighted next-token model coupled to the CLEX word IDs
 """
 from __future__ import annotations
 
@@ -30,6 +25,8 @@ TONE_UMLAUT = str.maketrans({
     'Ü':'v','Ǖ':'v','Ǘ':'v','Ǚ':'v','Ǜ':'v',
 })
 CJK_RANGES = ((0x3400,0x4DBF),(0x4E00,0x9FFF),(0x20000,0x2FA1F))
+SPECIAL_SOURCES = {'diming', 'mingren', 'yiren', 'taifeng', 'fangyan'}
+TOLERANCE_SOURCES = {'cuoyin', 'duoyin'}
 
 
 def is_cjk_char(ch: str) -> bool:
@@ -41,17 +38,31 @@ def cjk_only(text: str) -> bool:
     return bool(text) and all(is_cjk_char(ch) for ch in text)
 
 
-def normalize_pinyin(raw: str) -> list[str]:
+def strip_marks(raw: str) -> str:
     s = unicodedata.normalize('NFC', raw.strip()).translate(TONE_UMLAUT)
     s = s.replace('u:', 'v').replace('U:', 'v')
     s = unicodedata.normalize('NFD', s)
     s = ''.join(ch for ch in s if unicodedata.category(ch) != 'Mn')
-    s = unicodedata.normalize('NFC', s).lower()
-    s = re.sub(r'[1-5]', '', s)
+    return unicodedata.normalize('NFC', s).lower()
+
+
+def normalize_pinyin(raw: str) -> list[str]:
+    s = re.sub(r'[1-5]', '', strip_marks(raw))
     parts = re.split(r"[\s'’·\-_/]+", s)
     clean = []
     for part in parts:
         part = re.sub(r'[^a-zv]', '', part)
+        if part:
+            clean.append(part)
+    return clean
+
+
+def normalize_mixed_code(raw: str) -> list[str]:
+    s = re.sub(r'(?<=[a-zv])[1-5](?=$|[^0-9])', '', strip_marks(raw))
+    parts = re.split(r"[\s'’·\-_/]+", s)
+    clean = []
+    for part in parts:
+        part = re.sub(r'[^a-z0-9v]', '', part)
         if part:
             clean.append(part)
     return clean
@@ -67,16 +78,23 @@ def parse_weight(raw: str) -> float:
     return v if math.isfinite(v) and v > 0 else 1.0
 
 
+def looks_numeric(raw: str) -> bool:
+    return bool(re.fullmatch(r'\s*[-+]?\d+(?:\.\d+)?%?\s*', raw or ''))
+
+
 def parse_rime(path: Path):
     body = False
     for lineno, raw in enumerate(path.read_text(encoding='utf-8-sig', errors='replace').splitlines(), 1):
         s = raw.strip()
         if not body:
-            if s == '...': body = True
+            if s == '...':
+                body = True
             continue
-        if not s or s.startswith('#'): continue
+        if not s or s.startswith('#'):
+            continue
         f = raw.split('\t')
-        if len(f) < 2: continue
+        if len(f) < 2:
+            continue
         word = unicodedata.normalize('NFC', f[0].strip())
         reading = f[1].strip()
         weight = parse_weight(f[2]) if len(f) > 2 else 1.0
@@ -84,12 +102,37 @@ def parse_rime(path: Path):
             yield word, reading, weight, lineno
 
 
-def parse_latin_terms(path: Path):
-    """Yield (display, lexicon_word, weight, aliases) from a small curated TSV.
+def parse_english_rime(path: Path):
+    """Parse common Rime English table layouts without assuming one exact schema."""
+    body = False
+    seen = 0
+    for lineno, raw in enumerate(path.read_text(encoding='utf-8-sig', errors='replace').splitlines(), 1):
+        s = raw.strip()
+        if not body:
+            if s == '...':
+                body = True
+            continue
+        if not s or s.startswith('#'):
+            continue
+        f = [x.strip() for x in raw.split('\t')]
+        word = unicodedata.normalize('NFC', f[0])
+        if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]{2,23}", word):
+            continue
+        if len(f) >= 2 and looks_numeric(f[1]):
+            reading, weight = word, parse_weight(f[1])
+        else:
+            reading = f[1] if len(f) >= 2 and f[1] else word
+            weight = parse_weight(f[2]) if len(f) >= 3 else 1.0
+        alias = re.sub(r'[^a-z]', '', reading.lower())
+        display = word.lower()
+        if len(alias) < 3:
+            continue
+        seen += 1
+        yield display, alias, weight, lineno, seen
 
-    Format: display<TAB>weight<TAB>alias1,alias2,...
-    The lexicon form is lowercased for CLEX stability; CIME keeps display casing.
-    """
+
+def parse_latin_terms(path: Path):
+    """Yield (display, lexicon_word, weight, aliases) from curated TSV."""
     for lineno, raw in enumerate(path.read_text(encoding='utf-8-sig', errors='replace').splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith('#'):
@@ -114,12 +157,30 @@ def parse_latin_terms(path: Path):
         yield display, display.lower(), weight, aliases
 
 
+def parse_custom_terms(path: Path):
+    """candidate<TAB>reading<TAB>weight, allowing Chinese/Latin/mixed candidates."""
+    for lineno, raw in enumerate(path.read_text(encoding='utf-8-sig', errors='replace').splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        f = raw.split('\t')
+        if len(f) < 2:
+            raise SystemExit(f'{path}:{lineno}: expected candidate<TAB>reading[<TAB>weight]')
+        word = unicodedata.normalize('NFC', f[0].strip())
+        reading = f[1].strip()
+        weight = parse_weight(f[2]) if len(f) > 2 else 1000.0
+        if word and reading:
+            yield word, reading, weight, lineno
+
+
+def source_name(path: Path) -> str:
+    name = path.name
+    return name[:-10] if name.endswith('.dict.yaml') else path.stem
+
+
 def word_score(word: str, weight: float) -> float:
-    # Strongly suppress rare/supplementary single characters without deleting
-    # useful rare words entirely. This is specifically meant to stop junk such
-    # as 穦 from outranking normal characters such as 拼/品/频.
     score = weight
-    if len(word) == 1:
+    if len(word) == 1 and cjk_only(word):
         if ord(word) > 0xFFFF:
             score *= 0.001
         if weight < 5:
@@ -131,15 +192,20 @@ def word_score(word: str, weight: float) -> float:
     return score
 
 
+def synthetic_english_frequency(rank: int, raw_weight: float) -> float:
+    # Keep useful spelling/completion evidence without letting the English table
+    # dominate a Chinese pack's unigram distribution.
+    rank_component = max(20.0, 2400.0 / math.sqrt(rank + 1))
+    weight_component = min(1200.0, max(1.0, math.log10(max(10.0, raw_weight)) * 180.0))
+    return max(rank_component, weight_component)
+
+
 def build_cngm(code: str, ordered_words: list[str], freqs: dict[str, float], out: Path, max_following: int = 48):
     ids = {w:i for i,w in enumerate(ordered_words)}
     pair_counts: dict[tuple[str,str], float] = collections.defaultdict(float)
 
-    # Derive high-signal transitions from actual weighted dictionary phrases.
-    # 1) character -> character transitions inside words (拼 -> 音)
-    # 2) dictionary-word splits inside longer phrases (中文 -> 输入法)
     for phrase, raw_weight in freqs.items():
-        if len(phrase) < 2 or len(phrase) > 12 or not cjk_only(phrase):
+        if len(phrase) < 2 or len(phrase) > 16 or not cjk_only(phrase):
             continue
         strength = math.sqrt(max(1.0, raw_weight))
         chars = list(phrase)
@@ -147,8 +213,6 @@ def build_cngm(code: str, ordered_words: list[str], freqs: dict[str, float], out
             if a in ids and b in ids:
                 pair_counts[(a,b)] += strength
 
-        # All useful two-part dictionary splits, weighted but normalized so long
-        # phrases don't flood the model.
         splits = []
         for i in range(1, len(phrase)):
             a,b = phrase[:i], phrase[i:]
@@ -174,14 +238,24 @@ def build_cngm(code: str, ordered_words: list[str], freqs: dict[str, float], out
     ranked.sort(key=lambda item: (ids[item[0][0]], -item[1], ids[item[0][1]]))
 
     blob = bytearray(b'CNGM' + struct.pack('<II', 1, len(ranked)))
-    for (prev,_),_count in ranked: blob += struct.pack('<I', ids[prev])
-    for (_,following),_count in ranked: blob += struct.pack('<I', ids[following])
+    for (prev,_),_count in ranked:
+        blob += struct.pack('<I', ids[prev])
+    for (_,following),_count in ranked:
+        blob += struct.pack('<I', ids[following])
     for (prev,_), count in ranked:
         probability = count / totals[prev]
         blob.append(max(0, min(255, round((math.log10(probability) + 6) * 42))))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(blob)
     print(f'Built {out} with {len(ranked):,} weighted transitions.')
+
+
+def add_candidate(readings, key: str, candidate: str, score: float, weight: float, seen: int):
+    if not key:
+        return
+    old = readings[key].get(candidate)
+    if old is None or score > old[0]:
+        readings[key][candidate] = (score, weight, old[2] if old else seen)
 
 
 def main():
@@ -191,29 +265,49 @@ def main():
     ap.add_argument('--out-dir', type=Path, default=Path('source'))
     ap.add_argument('--lexicon-limit', type=int, default=300000)
     ap.add_argument('--max-candidates', type=int, default=16)
-    ap.add_argument('--max-ime-readings', type=int, default=300000,
-                    help='Global IME reading budget, keeping the highest-signal readings. 0 = unlimited.')
+    ap.add_argument('--max-ime-readings', type=int, default=300000)
     ap.add_argument('--max-word-length', type=int, default=12)
     ap.add_argument('--max-following', type=int, default=48)
     ap.add_argument('--single-char-ime-min-weight', type=float, default=200.0)
-    ap.add_argument('--latin-terms', type=Path,
-                    help='Optional curated Latin/brand terms TSV for mixed Chinese-English input.')
+
+    ap.add_argument('--latin-terms', type=Path)
+    ap.add_argument('--english-dict', type=Path)
+    ap.add_argument('--english-limit', type=int, default=20000)
+    ap.add_argument('--english-typo-limit', type=int, default=2500)
+    ap.add_argument('--mixed-dict', type=Path)
+    ap.add_argument('--custom-terms', type=Path)
+
+    ap.add_argument('--jianpin-limit', type=int, default=50000)
+    ap.add_argument('--jianpin-min-weight', type=float, default=20.0)
+    ap.add_argument('--jianpin-prefix-min-weight', type=float, default=200.0)
+    ap.add_argument('--jianpin-max-syllables', type=int, default=8)
+    ap.add_argument('--special-reading-budget', type=int, default=25000)
+    ap.add_argument('--long-phrase-reading-budget', type=int, default=30000)
     args = ap.parse_args()
 
-    # word -> best raw frequency
     freqs: dict[str,float] = {}
-    # reading -> candidate -> (score, raw weight, first seen)
     readings: dict[str, dict[str, tuple[float,float,int]]] = collections.defaultdict(dict)
-    # CIME display candidate -> normalized CLEX token. Chinese maps to itself;
-    # Latin brands can keep display casing while CLEX remains lowercase.
     candidate_lexicon: dict[str, str] = {}
-    latin_aliases: set[str] = set()
+    jianpin: dict[str, dict[str, tuple[float,float,int]]] = collections.defaultdict(dict)
+    protected: set[str] = {
+        'pin', 'yin', 'pinyin', 'pin yin',
+        'nihao', 'ni hao', 'meiyou', 'mei you',
+        'zenme', 'zen me', 'zenmehuishi', 'zen me hui shi',
+        'weishenme', 'wei shen me',
+        'buzhidao', 'bu zhi dao', 'keyi', 'ke yi',
+        'xianzai', 'xian zai', 'jintian', 'jin tian',
+        'mingtian', 'ming tian', 'zhongwen', 'zhong wen',
+        'shurufa', 'shu ru fa', 'suoyi', 'suo yi',
+    }
+    special_scores: dict[str, float] = {}
+    long_scores: dict[str, float] = {}
     seen = 0
 
     for path in args.inputs:
         if not path.is_file():
             raise SystemExit(f'Required input not found: {path}')
-        print(f'Reading {path} ...')
+        src = source_name(path)
+        print(f'Reading {path} ({src}) ...')
         for word, raw_reading, weight, _lineno in parse_rime(path):
             if not cjk_only(word):
                 continue
@@ -227,15 +321,98 @@ def main():
             seen += 1
             freqs[word] = max(freqs.get(word, 0.0), weight)
             score = word_score(word, weight)
-            # Do not expose ultra-low-frequency single Hanzi as normal Pinyin
-            # candidates. They stay in CLEX but cannot pollute the first page.
             if len(word) == 1 and weight < args.single_char_ime_min_weight:
                 continue
-            for key in ({compact, spaced} if len(syllables) > 1 else {compact}):
-                old = readings[key].get(word)
-                if old is None or score > old[0]:
-                    readings[key][word] = (score, weight, old[2] if old else seen)
 
+            keys = {compact, spaced} if len(syllables) > 1 else {compact}
+            for key in keys:
+                add_candidate(readings, key, word, score, weight, seen)
+                if src in TOLERANCE_SOURCES:
+                    protected.add(key)
+                if src in SPECIAL_SOURCES:
+                    special_scores[key] = max(special_scores.get(key, 0.0), score)
+                if src == 'lianxiang' or len(syllables) >= 5:
+                    long_scores[key] = max(long_scores.get(key, 0.0), score)
+
+            if 2 <= len(syllables) <= args.jianpin_max_syllables and weight >= args.jianpin_min_weight:
+                initials = ''.join(part[0] for part in syllables)
+                jscore = score * (1.0 + min(6, len(syllables)) * 0.04)
+                add_candidate(jianpin, initials, word, jscore, weight, seen)
+                # For high-frequency phrases with 4+ syllables, also allow a
+                # 3+ initial prefix: zmh -> 怎么回事, while full zmhs still works.
+                if len(initials) >= 4 and weight >= args.jianpin_prefix_min_weight:
+                    for n in range(3, len(initials)):
+                        add_candidate(jianpin, initials[:n], word, jscore * 0.92, weight, seen)
+
+    if not freqs:
+        raise SystemExit('No usable Wanxiang entries were parsed.')
+
+    normal_chinese_keys = set(readings)
+
+    # Wanxiang mixed table: Github仓库 / 3A游戏 / QQ邮箱 etc.
+    if args.mixed_dict:
+        if not args.mixed_dict.is_file():
+            raise SystemExit(f'Mixed dictionary not found: {args.mixed_dict}')
+        print(f'Reading Wanxiang mixed dictionary {args.mixed_dict} ...')
+        for word, raw_reading, weight, _lineno in parse_rime(args.mixed_dict):
+            if args.max_word_length and len(word) > args.max_word_length + 8:
+                continue
+            parts = normalize_mixed_code(raw_reading)
+            if not parts:
+                continue
+            seen += 1
+            lex = word.lower()
+            candidate_lexicon[word] = lex
+            freqs[lex] = max(freqs.get(lex, 0.0), max(30.0, weight))
+            compact, spaced = ''.join(parts), ' '.join(parts)
+            score = max(400.0, weight)
+            for key in ({compact, spaced} if len(parts) > 1 else {compact}):
+                add_candidate(readings, key, word, score, weight, seen)
+                protected.add(key)
+
+    # Project-maintained technical/game/network/slang additions.
+    if args.custom_terms:
+        if not args.custom_terms.is_file():
+            raise SystemExit(f'Custom terms file not found: {args.custom_terms}')
+        print(f'Reading project custom terms {args.custom_terms} ...')
+        for word, raw_reading, weight, _lineno in parse_custom_terms(args.custom_terms):
+            parts = normalize_mixed_code(raw_reading)
+            if not parts:
+                continue
+            seen += 1
+            lex = word.lower()
+            candidate_lexicon[word] = lex
+            freqs[lex] = max(freqs.get(lex, 0.0), max(50.0, weight))
+            compact, spaced = ''.join(parts), ' '.join(parts)
+            score = max(800.0, weight * 2.0)
+            for key in ({compact, spaced} if len(parts) > 1 else {compact}):
+                add_candidate(readings, key, word, score, weight, seen)
+                protected.add(key)
+
+    # High-frequency English exact words from Wanxiang en.dict.yaml.
+    english_exact: set[str] = set()
+    english_ranked = []
+    if args.english_dict:
+        if not args.english_dict.is_file():
+            raise SystemExit(f'English dictionary not found: {args.english_dict}')
+        english_entries = list(parse_english_rime(args.english_dict))
+        english_entries.sort(key=lambda x: (-x[2], x[4], x[0]))
+        english_ranked = english_entries[:args.english_limit] if args.english_limit else english_entries
+        print(f'Using {len(english_ranked):,} high-frequency English words from {args.english_dict}.')
+        for rank, (display, alias, raw_weight, _lineno, _order) in enumerate(english_ranked, 1):
+            seen += 1
+            english_exact.add(alias)
+            synthetic = synthetic_english_frequency(rank, raw_weight)
+            candidate_lexicon[display] = display.lower()
+            freqs[display.lower()] = max(freqs.get(display.lower(), 0.0), synthetic)
+            # Exact English is deliberately moderate: for short collisions such
+            # as "you", normal Chinese Pinyin remains competitive/usually first.
+            escore = min(1800.0, synthetic)
+            add_candidate(readings, alias, display, escore, synthetic, seen)
+            protected.add(alias)
+
+    # Curated brands/technical terms preserve casing and carry hand-reviewed typos.
+    curated_aliases: set[str] = set()
     if args.latin_terms:
         if not args.latin_terms.is_file():
             raise SystemExit(f'Latin terms file not found: {args.latin_terms}')
@@ -244,36 +421,78 @@ def main():
             seen += 1
             freqs[lexicon_word] = max(freqs.get(lexicon_word, 0.0), weight)
             candidate_lexicon[display] = lexicon_word
+            exact = re.sub(r'[^a-z0-9]+', '', display.lower())
             for alias in aliases:
-                latin_aliases.add(alias)
-                old = readings[alias].get(display)
-                score = weight * 10.0
-                if old is None or score > old[0]:
-                    readings[alias][display] = (score, weight, old[2] if old else seen)
+                curated_aliases.add(alias)
+                # Exact branded spelling is strongest; reviewed typo aliases are
+                # still strong but do not alter the lexicon word itself.
+                score = weight * (12.0 if alias == exact else 8.0)
+                add_candidate(readings, alias, display, score, weight, seen)
+                protected.add(alias)
 
-    if not freqs:
-        raise SystemExit('No usable Wanxiang entries were parsed.')
+    # Safe automatic English typo aliases. We only use adjacent transpositions
+    # and one-character omissions for the most frequent words, and discard any
+    # typo that collides with a real English word, a normal Pinyin reading, or
+    # more than one source word.
+    if english_ranked and args.english_typo_limit:
+        proposals: dict[str, set[str]] = collections.defaultdict(set)
+        display_by_alias = {alias: display for display, alias, *_ in english_ranked}
+        top_aliases = [alias for _display, alias, *_ in english_ranked[:args.english_typo_limit]]
+        for alias in top_aliases:
+            if len(alias) < 5 or len(alias) > 14:
+                continue
+            for i in range(len(alias) - 1):
+                if alias[i] == alias[i+1]:
+                    continue
+                typo = alias[:i] + alias[i+1] + alias[i] + alias[i+2:]
+                proposals[typo].add(alias)
+            for i in range(1, len(alias) - 1):
+                typo = alias[:i] + alias[i+1:]
+                proposals[typo].add(alias)
 
-    # Keep the strongest general vocabulary, then force-include all characters
-    # and all top IME candidates so lookup/ranking assets stay consistent.
+        auto_typos = 0
+        for typo, origins in sorted(proposals.items()):
+            if len(origins) != 1:
+                continue
+            if typo in english_exact or typo in curated_aliases or typo in normal_chinese_keys:
+                continue
+            origin = next(iter(origins))
+            display = display_by_alias[origin]
+            seen += 1
+            add_candidate(readings, typo, display, 650.0, 100.0, seen)
+            protected.add(typo)
+            auto_typos += 1
+        print(f'Added {auto_typos:,} collision-filtered automatic English typo aliases.')
+
+    # Add jianpin only after exact Pinyin/English/mixed keys are known. Never
+    # replace a real complete reading; exact keys keep their normal meaning.
+    jianpin_rows = []
+    forbidden_jianpin = set(readings)
+    for key, candidates in jianpin.items():
+        if key in forbidden_jianpin or len(key) < 2:
+            continue
+        strongest = max(meta[0] for meta in candidates.values())
+        jianpin_rows.append((key, strongest, candidates))
+    jianpin_rows.sort(key=lambda item: (-item[1], len(item[0]), item[0]))
+    if args.jianpin_limit:
+        jianpin_rows = jianpin_rows[:args.jianpin_limit]
+    for key, _strongest, candidates in jianpin_rows:
+        for word, meta in candidates.items():
+            add_candidate(readings, key, word, meta[0], meta[1], meta[2])
+        protected.add(key)
+    print(f'Added {len(jianpin_rows):,} non-conflicting jianpin readings.')
+
+    # Protect the highest-signal names/places and long-phrase readings so a
+    # global size budget cannot silently erase these requested categories.
+    for key, _score in sorted(special_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:args.special_reading_budget]:
+        protected.add(key)
+    for key, _score in sorted(long_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:args.long_phrase_reading_budget]:
+        protected.add(key)
+
     ranked_words = sorted(freqs, key=lambda w: (-word_score(w, freqs[w]), -freqs[w], len(w), w))
     keep = set(ranked_words[:args.lexicon_limit] if args.lexicon_limit else ranked_words)
-    keep.update(w for w in freqs if len(w) == 1)
+    keep.update(w for w in freqs if len(w) == 1 and cjk_only(w))
 
-    # Bound the IME table so a huge source dictionary cannot make the keyboard
-    # load a multi-tens-of-megabytes conversion table. Rank readings by the
-    # strongest candidate, while always preserving the regression probes below.
-    protected = {
-        'pin', 'yin', 'pinyin', 'pin yin',
-        'nihao', 'ni hao', 'meiyou', 'mei you',
-        'zenmehuishi', 'zen me hui shi',
-        'weishenme', 'wei shen me',
-        'buzhidao', 'bu zhi dao', 'keyi', 'ke yi',
-        'xianzai', 'xian zai', 'jintian', 'jin tian',
-        'mingtian', 'ming tian', 'zhongwen', 'zhong wen',
-        'shurufa', 'shu ru fa',
-    }
-    protected.update(latin_aliases)
     reading_order = sorted(
         readings,
         key=lambda r: (
@@ -284,7 +503,17 @@ def main():
         ),
     )
     if args.max_ime_readings and len(reading_order) > args.max_ime_readings:
-        chosen = set(reading_order[:args.max_ime_readings]) | (protected & set(readings))
+        mandatory = [r for r in reading_order if r in protected]
+        if len(mandatory) > args.max_ime_readings:
+            raise SystemExit(
+                f'Protected reading set ({len(mandatory):,}) exceeds IME budget '
+                f'({args.max_ime_readings:,}); raise the budget instead of silently dropping features.'
+            )
+        chosen = set(mandatory)
+        for r in reading_order:
+            if len(chosen) >= args.max_ime_readings:
+                break
+            chosen.add(r)
         reading_order = [r for r in reading_order if r in chosen]
 
     ime_rows = {}
@@ -294,7 +523,7 @@ def main():
         top = [w for w,_ in ranked[:args.max_candidates]]
         if top:
             ime_rows[reading] = top
-            keep.update(candidate_lexicon.get(w, w) for w in top)
+            keep.update(candidate_lexicon.get(w, w).lower() for w in top)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     lex_path = args.out_dir / f'{args.code}.txt'
@@ -306,18 +535,21 @@ def main():
             f.write(f'{word}\t{freqs.get(word,1.0):g}\n')
 
     with ime_path.open('w', encoding='utf-8', newline='\n') as f:
-        f.write('# reading<TAB>candidate... — compact and spaced Pinyin keys\n')
+        f.write('# reading<TAB>candidate... — full Pinyin, jianpin, mixed and English keys\n')
         for reading in sorted(ime_rows):
             f.write('\t'.join([reading, *ime_rows[reading]]) + '\n')
 
-    # CNGM IDs must be the same bytewise order build-pack.py uses.
     ordered = sorted(keep, key=lambda w: w.encode('utf-8'))
     build_cngm(args.code, ordered, freqs, Path('Lexicons')/f'{args.code}.cngm', args.max_following)
 
     print(f'Lexicon words: {len(keep):,}')
     print(f'IME readings:  {len(ime_rows):,}')
-    for probe in ('pin','yin','pinyin','pin yin','nihao','ni hao','meiyou','mei you','zenmehuishi','zen me hui shi'):
+    for probe in (
+        'pin','pinyin','pin yin','nihao','ni hao','bzd','wsm','zmhs','zmh',
+        'github','githbu','computer','pyhton','githubcangku','yyds'
+    ):
         print(probe, '=>', ' / '.join(ime_rows.get(probe, [])[:8]) or 'MISSING')
+
 
 if __name__ == '__main__':
     main()
