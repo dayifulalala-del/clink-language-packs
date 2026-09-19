@@ -68,3 +68,29 @@ v3 以 `base-dicts.zip` 实际内容为准，而不是假设仓库分支上的�
 - Release 中不得出现任何“万象验证”诊断候选；
 - manifest 只能发布一个 `zh` 包；
 - 只发布 `zh.cime / zh.clex / zh.cngm` 三个语言资产，不混入官方旧神经模型。
+
+
+## 中文键盘中的常用英文与保守纠错
+
+v3 还带一份人工维护的 `source/zh-latin-terms.tsv`。目的不是把整套英文词典硬塞进中文 IME，而是让中文键盘里常见的品牌、开发工具和技术词能直接正确输出，并给少数高价值词提供保守的 typo alias。
+
+例如：
+
+- `github` → `GitHub`
+- `chatgpt` → `ChatGPT`
+- `codex` → `Codex`
+- `openai` → `OpenAI`
+- `iphone` → `iPhone`
+- `docker` → `Docker`
+- `python` → `Python`
+- `xcode` → `Xcode`
+
+并包含少量明确的常见误拼：
+
+- `githbu` → `GitHub`
+- `chatgtp` → `ChatGPT`
+- `codxe` → `Codex`
+- `doker` → `Docker`
+- `pyhton` → `Python`
+
+正确英文词也会进入 CLEX，使 Clink 自身的 spelling help 有词典依据。App 内部的通用自动纠错算法不属于语言包，因此 v3 不会给 40 万拼音 reading 暴力生成模糊拼写；这样能避免中文候选被大量错误 alias 污染。
