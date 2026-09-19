@@ -64,6 +64,7 @@ def main() -> None:
     p.add_argument("--max-word-length", type=int, default=16)
     p.add_argument("--max-following", type=int, default=64)
     p.add_argument("--single-char-ime-min-weight", type=float, default=1.0)
+    p.add_argument("--latin-terms", type=Path, default=Path("source/zh-latin-terms.tsv"))
     p.add_argument("--receipt-json", type=Path)
     args = p.parse_args()
 
@@ -84,6 +85,10 @@ def main() -> None:
         "--max-following", str(args.max_following),
         "--single-char-ime-min-weight", str(args.single_char_ime_min_weight),
     ]
+    if args.latin_terms:
+        if not args.latin_terms.is_file():
+            raise SystemExit(f"Missing curated Latin terms file: {args.latin_terms}")
+        command += ["--latin-terms", str(args.latin_terms)]
     subprocess.run(command, check=True)
 
     ime = args.out_dir / f"{args.code}-ime.tsv"
@@ -97,6 +102,11 @@ def main() -> None:
             "builderVersion": 3,
             "code": args.code,
             "delegate": delegate.name,
+            "latinTerms": ({
+                "path": str(args.latin_terms),
+                "sha256": sha256(args.latin_terms),
+                "byteCount": args.latin_terms.stat().st_size,
+            } if args.latin_terms else None),
             "standardTables": [
                 {
                     "name": name,
