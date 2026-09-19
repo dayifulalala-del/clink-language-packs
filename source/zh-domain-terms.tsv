@@ -1,0 +1,157 @@
+# candidate<TAB>reading<TAB>weight
+# Project-maintained additions for high-value tech/game/network/slang terms.
+# Wanxiang remains the primary source; these entries only cover practical gaps.
+
+# Network / homelab / development
+软路由	ruan lu you	9000
+旁路由	pang lu you	6500
+主路由	zhu lu you	6500
+分流	fen liu	8000
+直连	zhi lian	8000
+代理	dai li	7000
+节点	jie dian	7500
+订阅	ding yue	6500
+配置文件	pei zhi wen jian	6000
+规则集	gui ze ji	5000
+域名解析	yu ming jie xi	4500
+内网	nei wang	7000
+公网	gong wang	7000
+端口转发	duan kou zhuan fa	5500
+端口映射	duan kou ying she	5000
+内网穿透	nei wang chuan tou	5000
+远程访问	yuan cheng fang wen	5000
+虚拟机	xu ni ji	7000
+容器	rong qi	6500
+镜像	jing xiang	6000
+仓库	cang ku	6500
+代码仓库	dai ma cang ku	5500
+编译	bian yi	6500
+构建	gou jian	6500
+调试	tiao shi	6500
+日志	ri zhi	7000
+报错	bao cuo	7000
+崩溃	beng kui	6500
+闪退	shan tui	6500
+开源	kai yuan	6500
+闭源	bi yuan	5000
+软链接	ruan lian jie	5000
+硬链接	ying lian jie	4000
+网关	wang guan	7000
+子网	zi wang	6000
+掩码	yan ma	5000
+丢包	diu bao	7000
+延迟	yan chi	7500
+抖动	dou dong	5500
+带宽	dai kuan	7000
+测速	ce su	6500
+拨号	bo hao	6000
+桥接	qiao jie	6000
+旁路	pang lu	4500
+
+DNS	dns	7000
+IPv4	ipv4	6500
+IPv6	ipv6	7000
+WiFi	wifi	7000
+LAN	lan	6000
+WAN	wan	6000
+NAS	nas	7000
+VPS	vps	6500
+SSH	ssh	7000
+SFTP	sftp	5000
+SMB	smb	5500
+NFS	nfs	5500
+RAID	raid	6000
+Docker	docker	8000
+Git	git	7500
+GitHub	github	9000
+GitLab	gitlab	6000
+API	api	7000
+JSON	json	6500
+YAML	yaml	6000
+Python	python	8000
+Swift	swift	6500
+Xcode	xcode	8000
+OpenWrt	openwrt	8000
+ImmortalWrt	immortalwrt	7500
+OpenClash	openclash	8000
+Mihomo	mihomo	6500
+AdGuard	adguard	6500
+Tailscale	tailscale	6500
+Cloudflare	cloudflare	6500
+Proxmox	proxmox	6500
+OpenCore	opencore	6000
+Hackintosh	hackintosh	5500
+TestFlight	testflight	6500
+ChatGPT	chatgpt	9000
+Codex	codex	8500
+OpenAI	openai	8500
+
+# Hardware / gaming
+显卡	xian ka	8000
+核显	he xian	5500
+独显	du xian	5500
+帧率	zhen lv	7000
+帧数	zhen shu	6500
+掉帧	diao zhen	6500
+卡顿	ka dun	7000
+光追	guang zhui	6500
+超频	chao pin	6500
+降压	jiang ya	5000
+温度墙	wen du qiang	4000
+功耗墙	gong hao qiang	4000
+驱动	qu dong	7500
+游戏	you xi	8000
+游戏本	you xi ben	6000
+主机	zhu ji	7000
+服务器	fu wu qi	7500
+开黑	kai hei	6500
+上分	shang fen	6500
+排位	pai wei	6500
+匹配	pi pei	6500
+组队	zu dui	6500
+掉线	diao xian	6500
+重连	chong lian	5500
+延迟高	yan chi gao	5000
+三A大作	san a da zuo	4500
+3A大作	3a da zuo	6000
+Steam	steam	7000
+Epic	epic	5500
+Xbox	xbox	5500
+PlayStation	playstation	5500
+Switch	switch	5500
+FPS	fps	6000
+RPG	rpg	5000
+MOBA	moba	5000
+
+# Internet slang / everyday modern terms
+YYDS	yyds	7000
+永远的神	yyds	6500
+笑死我了	xswl	7000
+啊我死了	awsl	4500
+你说得对	nsdd	5000
+有一说一	u1s1	6000
+真情实感	zqsg	4500
+对不起	dbq	5500
+漂亮妹妹	plmm	4000
+破防	po fang	7000
+上头	shang tou	6500
+下头	xia tou	6000
+吃瓜	chi gua	7000
+社死	she si	6500
+内卷	nei juan	7000
+躺平	tang ping	7000
+摆烂	bai lan	7000
+电子榨菜	dian zi zha cai	5500
+显眼包	xian yan bao	5500
+赛博朋克	sai bo peng ke	5500
+情绪价值	qing xu jia zhi	5500
+松弛感	song chi gan	5500
+搭子	da zi	5500
+搭子文化	da zi wen hua	4000
+网感	wang gan	4500
+UP主	up zhu	6000
+B站	b zhan	6500
+小红书	xiao hong shu	6500
+抖音	dou yin	7000
+微博	wei bo	7000
+微信	wei xin	8000
