@@ -24,17 +24,15 @@
 
 `dict-nightly` 是滚动更新的预览版，因此同一个 tag 的内容会随着上游更新而变化。每个 Clink Release 都附带 `wanxiang-source.json`，记录实际使用的 upstream release ID、发布时间、asset SHA-256，以及所有参与构建的词典文件 SHA-256，便于复现。
 
-## 使用的完整标准词表
+## 使用的完整 nightly 中文词表
 
-按万象 `wanxiang.dict.yaml` 的标准导入顺序使用：
+v3 以 `base-dicts.zip` 实际内容为准，而不是假设仓库分支上的每张表一定被打进 Release。核心 `zi / jichu / lianxiang` 必须存在；其余中文 `*.dict.yaml` 只要出现在当前 rolling asset 中就全部纳入。
 
-`zi / jichu / lianxiang / cuoyin / duoyin / shici / diming / yixue / huaxue / yaopin / mingren / yiren / wuzhong / renming / taifeng / fangyan`
-
-也就是字表、基础词、联想、多音、诗词、地名、医学、化学、药品、名人、艺人、物种、人名、台风、方言等标准完整数据源。
+当前构建会自动排除 `abbrev / t9_abbrev / en / mixed` 这几类不适合作为 Clink 中文 CIME 主数据的表。像 `cuoyin / duoyin / shici / diming / yixue / huaxue / yaopin / mingren / yiren / taifeng / fangyan` 等，只要 nightly 包里存在就会自动加入；如果上游未来重新加入 `wuzhong / renming` 或新增中文表，也会自动纳入并记录到 receipt。
 
 ## Clink 适配
 
-万象原始词库规模远大于 Clink 官方中文包；直接不加限制地塞入 iOS 键盘扩展会造成不必要的体积和内存压力。因此 v3 是“完整标准数据源 + Clink 高信号裁剪”，而不是把每个长尾 reading 原样复制进去：
+万象原始词库规模远大于 Clink 官方中文包；直接不加限制地塞入 iOS 键盘扩展会造成不必要的体积和内存压力。因此 v3 是“完整 nightly 中文数据源 + Clink 高信号裁剪”，而不是把每个长尾 reading 原样复制进去：
 
 - CIME：最多 400,000 个高信号 reading；
 - 每个 reading：最多 16 个候选（Clink 自身上限）；
