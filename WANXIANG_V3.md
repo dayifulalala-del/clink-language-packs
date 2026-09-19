@@ -1,0 +1,72 @@
+# Clink 中文万象 v3（dict-nightly）
+
+这是已经通过 iPhone 实机指纹验证后的正式 Community 中文包。
+
+## 已确认的 Clink 行为
+
+实机输入 `pinyin` 时，Clink 会把组合串显示为 `pin yin`。受控诊断版把该 reading 的第一候选设为“万象验证甲”后，iPhone 候选栏确实出现了该指纹，因此已经确认：
+
+- Community `zh` 会进入 Clink 的中文 Pinyin IME；
+- Community `zh.cime` 确实参与候选生成；
+- Clink 会把连续全拼自动切成带空格的音节序列；
+- 正式包因此同时保留 compact 与 syllable-spaced 两种 reading key。
+
+正式版已经删除所有“万象验证甲/乙/丙”诊断候选。
+
+## 上游数据
+
+本包每次构建都直接下载万象滚动预览 Release：
+
+- Upstream: https://github.com/amzxyz/rime-wanxiang
+- Release tag: `dict-nightly`
+- Asset: `base-dicts.zip`
+- License: CC BY 4.0（遵循万象上游署名和许可要求）
+
+`dict-nightly` 是滚动更新的预览版，因此同一个 tag 的内容会随着上游更新而变化。每个 Clink Release 都附带 `wanxiang-source.json`，记录实际使用的 upstream release ID、发布时间、asset SHA-256，以及所有参与构建的词典文件 SHA-256，便于复现。
+
+## 使用的完整标准词表
+
+按万象 `wanxiang.dict.yaml` 的标准导入顺序使用：
+
+`zi / jichu / lianxiang / cuoyin / duoyin / shici / diming / yixue / huaxue / yaopin / mingren / yiren / wuzhong / renming / taifeng / fangyan`
+
+也就是字表、基础词、联想、多音、诗词、地名、医学、化学、药品、名人、艺人、物种、人名、台风、方言等标准完整数据源。
+
+## Clink 适配
+
+万象原始词库规模远大于 Clink 官方中文包；直接不加限制地塞入 iOS 键盘扩展会造成不必要的体积和内存压力。因此 v3 是“完整标准数据源 + Clink 高信号裁剪”，而不是把每个长尾 reading 原样复制进去：
+
+- CIME：最多 400,000 个高信号 reading；
+- 每个 reading：最多 16 个候选（Clink 自身上限）；
+- CLEX：最多约 600,000 个高信号词，并强制保留全部汉字和实际进入 CIME 的候选；
+- 最长候选：16 个汉字；
+- 同时生成 compact 与带空格全拼 reading；
+- 极低频、生僻、扩展区单字只降权，不用官方旧表那种异常顺序；
+- CLEX 与 CNGM 使用同一份最终词表，避免 ID 不匹配；
+- 不携带 Clink 官方旧 neural model，避免旧模型与新词典混用。
+
+## 必过回归
+
+正式 Release 只有在以下第一候选全部正确时才发布：
+
+- `pinyin` / `pin yin` → `拼音`
+- `nihao` / `ni hao` → `你好`
+- `meiyou` / `mei you` → `没有`
+- `zenme` / `zen me` → `怎么`
+- `zenmehuishi` / `zen me hui shi` → `怎么回事`
+- `weishenme` / `wei shen me` → `为什么`
+- `buzhidao` / `bu zhi dao` → `不知道`
+- `keyi` / `ke yi` → `可以`
+- `xianzai` / `xian zai` → `现在`
+- `jintian` / `jin tian` → `今天`
+- `mingtian` / `ming tian` → `明天`
+- `zhongwen` / `zhong wen` → `中文`
+- `shurufa` / `shu ru fa` → `输入法`
+- `suoyi` / `suo yi` → `所以`
+
+另外：
+
+- `pin` 前 5 个候选不得出现 `穦`；
+- Release 中不得出现任何“万象验证”诊断候选；
+- manifest 只能发布一个 `zh` 包；
+- 只发布 `zh.cime / zh.clex / zh.cngm` 三个语言资产，不混入官方旧神经模型。
