@@ -38,8 +38,10 @@ jobs:
           python-version: "3.x"
 
       - name: Resolve and download current Wanxiang dict-nightly
+        id: upstream
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           rm -rf _wanxiang_release _wanxiang_dicts
@@ -71,12 +73,60 @@ jobs:
           print('local digest:', actual)
           if expected and expected != actual:
               raise SystemExit(f'asset digest mismatch: expected {expected}, got {actual}')
+          (root / 'current-sha256.txt').write_text(actual + '\n', encoding='utf-8')
           PY
 
+          # Pushes and manual runs are intentional local rebuilds, so always run.
+          # Scheduled runs publish only when the actual Wanxiang base-dicts.zip
+          # bytes differ from the receipt attached to our current latest release.
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            current_digest="$(cat _wanxiang_release/current-sha256.txt)"
+            latest_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            previous_digest=""
+
+            if [ -n "$latest_tag" ]; then
+              rm -rf _previous_release
+              mkdir -p _previous_release
+              if gh release download "$latest_tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern wanxiang-source.json \
+                --dir _previous_release >/dev/null 2>&1; then
+                previous_digest="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('_previous_release/wanxiang-source.json')
+          try:
+              data = json.loads(p.read_text(encoding='utf-8'))
+              print(data.get('asset', {}).get('sha256') or '')
+          except Exception:
+              print('')
+          PY
+          )"
+              fi
+            fi
+
+            echo "Current Wanxiang digest:  $current_digest"
+            echo "Previous release digest:   ${previous_digest:-<none>}"
+
+            if [ -n "$previous_digest" ] && [ "$current_digest" = "$previous_digest" ]; then
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+              echo "Wanxiang dict-nightly data is unchanged; scheduled publish is skipped."
+              exit 0
+            fi
+          fi
+
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
           unzip -q _wanxiang_release/base-dicts.zip -d _wanxiang_dicts
           find _wanxiang_dicts -type f -name '*.dict.yaml' -maxdepth 5 | sort | sed -n '1,80p'
 
+      - name: Skip unchanged scheduled build
+        if: steps.upstream.outputs.should_build == 'false'
+        run: |
+          echo "No Wanxiang dict-nightly data change since the current latest release."
+          echo "No new Clink release will be created."
+
       - name: Build production zh sources from complete standard Wanxiang tables
+        if: steps.upstream.outputs.should_build == 'true'
         run: |
           set -euo pipefail
           rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm Lexicons/zh.bpevocab Lexicons/zh.mlmodelc
@@ -98,6 +148,7 @@ jobs:
             --receipt-json source/zh-wanxiang-build.json
 
       - name: Build CLEX and CIME with Clink official tools
+        if: steps.upstream.outputs.should_build == 'true'
         run: |
           set -euo pipefail
           python3 build-pack.py zh source/zh.txt
@@ -107,6 +158,7 @@ jobs:
           wc -l Lexicons/zh.cime
 
       - name: Production regression and fingerprint-removal tests
+        if: steps.upstream.outputs.should_build == 'true'
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -190,6 +242,7 @@ jobs:
           PY
 
       - name: Create reproducible Wanxiang source receipt
+        if: steps.upstream.outputs.should_build == 'true'
         run: |
           python3 - <<'PY'
           import json
@@ -224,6 +277,7 @@ jobs:
           PY
 
       - name: Build manifest containing only production zh
+        if: steps.upstream.outputs.should_build == 'true'
         run: |
           set -euo pipefail
           find Lexicons -mindepth 1 -maxdepth 1 \
@@ -248,6 +302,7 @@ jobs:
           PY
 
       - name: Publish verified production Release as latest
+        if: steps.upstream.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -269,6 +324,7 @@ jobs:
           gh release edit "$VERSION" --draft=false --latest
 
       - name: Re-download published manifest and verify latest Release
+        if: steps.upstream.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
