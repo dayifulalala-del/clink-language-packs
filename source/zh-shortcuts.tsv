@@ -1,7 +1,13 @@
 # candidate	reading	weight
-# Explicit user shortcuts. These override normal jianpin ranking for the same reading.
-快捷指令	kjzl	10000
-什么价	smjia	10000
-什么价	smj	11000
-取件码	qujianma	10000
-虚拟号	xunihao	10000
+# Explicit user shortcuts. Keep both compact and segmented forms because Clink
+# may normalize the same physical input differently before CIME lookup.
+快捷指令	kjzl	12000
+快捷指令	k j z l	12000
+什么价	smj	13000
+什么价	s m j	13000
+什么价	smjia	12000
+什么价	s m jia	12000
+取件码	qujianma	12000
+取件码	qu jian ma	12000
+虚拟号	xunihao	12000
+虚拟号	xu ni hao	12000
