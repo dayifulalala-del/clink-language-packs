@@ -53,3 +53,123 @@ Google	5000	google,googel
 Microsoft	3500	microsoft,microsfot
 Apple	4000	apple
 Amazon	3000	amazon
+
+
+# Apple ecosystem / common apps
+App Store	6500	appstore,appsrore,appstroe,apstore,appstor
+Apple Music	5500	applemusic,appelmusic
+Apple Pay	5500	applepay,appelpay
+Apple Watch	5500	applewatch,appelwatch
+AirPods	6000	airpods,airpod,airpds
+MacBook	6000	macbook,macbok
+MacBook Air	5000	macbookair,macbokair
+MacBook Pro	5000	macbookpro,macbokpro
+iPad	5500	ipad
+iMac	5000	imac
+Mac mini	5000	macmini
+Mac Studio	4500	macstudio
+iCloud	6000	icloud,iclod
+FaceTime	5000	facetime,facetme
+iMessage	5500	imessage,imesage
+AirDrop	5500	airdrop,airdop
+CarPlay	4500	carplay
+HomeKit	4500	homekit
+HomePod	4000	homepod
+Vision Pro	4500	visionpro
+Apple Intelligence	4500	appleintelligence
+Find My	4000	findmy
+
+# Google / Microsoft / browsers / productivity
+Gmail	6000	gmail,gmal
+Google Maps	5500	googlemaps,googelmaps
+Google Drive	5500	googledrive,googledrvie
+Google Photos	5000	googlephotos
+Google Play	5000	googleplay
+Chrome	6000	chrome,chorome
+Safari	6000	safari,safrai
+Firefox	5000	firefox,firefx
+Microsoft Edge	5000	microsoftedge,edge
+OneDrive	5000	onedrive,onedrvie
+Microsoft Office	4500	microsoftoffice
+Word	4500	word
+Excel	5000	excel,excle
+PowerPoint	4500	powerpoint,powerpiont
+Outlook	5000	outlook,outlok
+Microsoft Teams	4500	microsoftteams,teams
+Zoom	5000	zoom
+Slack	5000	slack
+Notion	5000	notion
+Figma	5000	figma
+Canva	4500	canva
+
+# Social / media / communication
+WhatsApp	5500	whatsapp,whatsap
+Instagram	5500	instagram,instgram
+Facebook	5000	facebook,facbook
+Messenger	4500	messenger,mesenger
+Threads	4500	threads
+Twitter	4500	twitter,twiter
+Spotify	5500	spotify,spotfy
+Twitch	4500	twitch
+Pinterest	4000	pinterest
+LinkedIn	4500	linkedin,linkdin
+Dropbox	4500	dropbox
+WeChat	5500	wechat
+QQ	5000	qq
+
+# Developer tools / cloud / databases
+Visual Studio Code	5500	visualstudiocode
+Android Studio	5000	androidstudio
+IntelliJ IDEA	4500	intellijidea,intellij
+PyCharm	4500	pycharm
+WebStorm	4000	webstorm
+Postman	5000	postman
+GitHub Copilot	5000	githubcopilot
+GitHub Actions	4500	githubactions
+GitHub Desktop	4000	githubdesktop
+Stack Overflow	5000	stackoverflow
+Kubernetes	5000	kubernetes,kubernets
+Nginx	5000	nginx
+MySQL	5000	mysql
+PostgreSQL	5000	postgresql,postgres
+MongoDB	5000	mongodb
+Redis	5000	redis
+SQLite	4500	sqlite
+React	5000	react
+Vue	4500	vue
+Angular	4500	angular
+Next.js	4500	nextjs
+npm	4500	npm
+pnpm	4000	pnpm
+Yarn	4000	yarn
+Rust	4500	rust
+Java	4500	java
+Kotlin	4500	kotlin
+CMake	4000	cmake
+Home Assistant	5000	homeassistant
+CloudFront	4000	cloudfront
+AWS	4500	aws
+Azure	4500	azure
+Vercel	4500	vercel
+Netlify	4000	netlify
+
+# Hardware / gaming / consumer tech
+NVIDIA	5500	nvidia,nvida
+GeForce	5000	geforce
+AMD	5000	amd
+Radeon	5000	radeon
+Intel	5000	intel
+Ryzen	5000	ryzen
+Snapdragon	4500	snapdragon
+Qualcomm	4000	qualcomm
+ASUS	4500	asus
+MSI	4500	msi
+Samsung	4500	samsung
+Xiaomi	4500	xiaomi
+Huawei	4500	huawei
+Sony	4500	sony
+PlayStation	5000	playstation,playstaion
+Nintendo	4500	nintendo
+Steam	5500	steam
+Steam Deck	4500	steamdeck
+Epic Games	4500	epicgames
