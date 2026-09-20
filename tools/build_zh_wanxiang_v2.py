@@ -139,8 +139,8 @@ def parse_latin_terms(path: Path):
             continue
         fields = raw.split('\t')
         display = unicodedata.normalize('NFC', fields[0].strip())
-        if not display or any(ch.isspace() for ch in display):
-            raise SystemExit(f'{path}:{lineno}: Latin display term must be one token: {display!r}')
+        if not display:
+            raise SystemExit(f'{path}:{lineno}: empty Latin display term')
         weight = parse_weight(fields[1]) if len(fields) > 1 and fields[1].strip() else 100000.0
         aliases_raw = fields[2] if len(fields) > 2 else display
         aliases = []
@@ -154,7 +154,10 @@ def parse_latin_terms(path: Path):
             aliases.insert(0, exact)
         if not aliases:
             raise SystemExit(f'{path}:{lineno}: no usable aliases for {display!r}')
-        yield display, display.lower(), weight, aliases
+        # CLEX entries cannot contain whitespace. Keep the display form for
+        # CIME, but store a compact normalized token in CLEX.
+        lexicon_word = exact or aliases[0]
+        yield display, lexicon_word, weight, aliases
 
 
 def parse_custom_terms(path: Path):
