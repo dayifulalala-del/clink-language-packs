@@ -73,6 +73,7 @@ def main() -> None:
     p.add_argument("--single-char-ime-min-weight", type=float, default=1.0)
     p.add_argument("--latin-terms", type=Path, default=Path("source/zh-latin-terms.tsv"))
     p.add_argument("--custom-terms", type=Path, default=Path("source/zh-domain-terms.tsv"))
+    p.add_argument("--shortcut-terms", type=Path, default=Path("source/zh-shortcuts.tsv"))
     p.add_argument("--english-limit", type=int, default=20000)
     p.add_argument("--english-typo-limit", type=int, default=2500)
     p.add_argument("--jianpin-limit", type=int, default=50000)
@@ -111,6 +112,10 @@ def main() -> None:
         if not args.custom_terms.is_file():
             raise SystemExit(f"Missing custom terms file: {args.custom_terms}")
         command += ["--custom-terms", str(args.custom_terms)]
+    if args.shortcut_terms:
+        if not args.shortcut_terms.is_file():
+            raise SystemExit(f"Missing shortcut terms file: {args.shortcut_terms}")
+        command += ["--shortcut-terms", str(args.shortcut_terms)]
     subprocess.run(command, check=True)
 
     ime = args.out_dir / f"{args.code}-ime.tsv"
@@ -148,6 +153,11 @@ def main() -> None:
                 "sha256": sha256(args.custom_terms),
                 "byteCount": args.custom_terms.stat().st_size,
             } if args.custom_terms else None),
+            "shortcutTerms": ({
+                "path": str(args.shortcut_terms),
+                "sha256": sha256(args.shortcut_terms),
+                "byteCount": args.shortcut_terms.stat().st_size,
+            } if args.shortcut_terms else None),
             "standardTables": [
                 {
                     "name": name,
