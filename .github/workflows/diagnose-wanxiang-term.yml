@@ -37,28 +37,33 @@ jobs:
           echo "===== substring 帝豪 ====="
           grep -RIn --include='*.dict.yaml' '帝豪' _wanxiang_dicts | head -50 || true
 
-      - name: Build current Clink source and inspect dihao
+      - name: Rank 帝豪 inside Wanxiang core jichu readings
         run: |
-          set -euo pipefail
-          python3 tools/build_zh_wanxiang_v3.py \
-            --dict-root _wanxiang_dicts \
-            --code zh \
-            --out-dir source \
-            --lexicon-limit 650000 \
-            --max-ime-readings 0 \
-            --max-candidates 16 \
-            --max-word-length 16 \
-            --max-following 64 \
-            --single-char-ime-min-weight 1 \
-            --latin-terms source/zh-latin-terms.tsv \
-            --custom-terms source/zh-domain-terms.tsv \
-            --shortcut-terms source/zh-shortcuts.tsv \
-            --english-limit 20000 \
-            --english-typo-limit 2500 \
-            --jianpin-limit 50000
-          echo "===== unbounded IME size ====="
-          wc -l source/zh-ime.tsv
-          du -h source/zh-ime.tsv
-          echo "===== generated dihao rows ====="
-          grep -n $'^dihao\t' source/zh-ime.tsv || true
-          grep -n $'^di hao\t' source/zh-ime.tsv || true
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          from build_zh_wanxiang_v2 import parse_rime, normalize_pinyin, word_score
+
+          jichu = next(Path('_wanxiang_dicts').rglob('jichu.dict.yaml'))
+          scores = {}
+          for word, raw_reading, weight, _ in parse_rime(jichu):
+              if len(word) > 16:
+                  continue
+              syllables = normalize_pinyin(raw_reading)
+              if not syllables:
+                  continue
+              compact = ''.join(syllables)
+              spaced = ' '.join(syllables)
+              score = word_score(word, weight)
+              for key in ({compact, spaced} if len(syllables) > 1 else {compact}):
+                  scores[key] = max(scores.get(key, 0.0), score)
+
+          ordered = sorted(scores, key=lambda k: (-scores[k], len(k), k))
+          rank = {k:i+1 for i,k in enumerate(ordered)}
+          print('jichu unique reading keys:', len(ordered))
+          for key in ('dihao','di hao'):
+              print(key, 'score=', scores.get(key), 'rank=', rank.get(key))
+          for budget in (100000,150000,200000,250000,300000,350000):
+              print('budget', budget, 'keeps dihao?', rank.get('dihao',10**9) <= budget, 'keeps di hao?', rank.get('di hao',10**9) <= budget)
+          PY
