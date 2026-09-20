@@ -199,6 +199,7 @@ jobs:
               'ruanluyou':'软路由',
               'kjzl':'快捷指令', 'k j z l':'快捷指令',
               'smjia':'什么价', 's m jia':'什么价',
+              'smj':'什么价', 's m j':'什么价',
               'yyds':'YYDS',
           }
           failed = []
