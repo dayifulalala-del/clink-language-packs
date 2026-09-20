@@ -196,6 +196,15 @@ jobs:
               'xcode':'Xcode',
               'computer':'computer',
               'compuer':'computer',
+              'appstore':'App Store', 'appsrore':'App Store',
+              'applemusic':'Apple Music',
+              'macbook':'MacBook',
+              'gmail':'Gmail',
+              'googlemaps':'Google Maps',
+              'safari':'Safari',
+              'instagram':'Instagram',
+              'spotify':'Spotify',
+              'githubcopilot':'GitHub Copilot',
               'ruanluyou':'软路由',
               'kjzl':'快捷指令', 'k j z l':'快捷指令',
               'smjia':'什么价', 's m jia':'什么价',
@@ -235,7 +244,7 @@ jobs:
               failed.append(('fingerprint leak', leaked))
 
           lex_source = Path('source/zh.txt').read_text(encoding='utf-8')
-          for word in ('github', 'chatgpt', 'codex', 'openai', 'iphone', 'docker', 'python', 'xcode', 'computer', 'server', 'network'):
+          for word in ('github', 'chatgpt', 'codex', 'openai', 'iphone', 'docker', 'python', 'xcode', 'computer', 'server', 'network', 'appstore', 'applemusic', 'macbook', 'gmail', 'googlemaps', 'safari', 'instagram', 'spotify', 'githubcopilot'):
               if not any(line.split('\t', 1)[0] == word for line in lex_source.splitlines() if line and not line.startswith('#')):
                   failed.append(('CLEX source missing Latin term', word))
 
