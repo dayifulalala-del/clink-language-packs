@@ -195,6 +195,7 @@ jobs:
               'computer':'computer',
               'compuer':'computer',
               'ruanluyou':'软路由',
+              'kjzl':'快捷指令',
               'yyds':'YYDS',
           }
           failed = []
