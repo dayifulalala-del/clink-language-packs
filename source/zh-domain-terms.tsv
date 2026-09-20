@@ -159,3 +159,8 @@ B站	b zhan	6500
 # Automotive / common vehicle terms
 帝豪	di hao	12000
 吉利帝豪	ji li di hao	11000
+
+# High-priority everyday phrases used by Clink's partial-Pinyin runtime ranking
+# Keep canonical full Pinyin here as well as shortcut aliases: the keyboard may
+# expand initials (smj) into shen/me/j... before consulting the CIME table.
+什么价	shen me jia	1000000
