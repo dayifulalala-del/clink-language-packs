@@ -35,7 +35,7 @@ jobs:
             --code zh \
             --out-dir source \
             --lexicon-limit 600000 \
-            --max-ime-readings 400000 \
+            --max-ime-readings 500000 \
             --max-candidates 12 \
             --max-word-length 16 \
             --max-following 32 \
@@ -45,7 +45,7 @@ jobs:
             --english-limit 30000 \
             --english-typo-limit 5000 \
             --jianpin-limit 30000 \
-            --core-compact-reading-budget 300000
+            --core-compact-reading-budget 250000
 
       - name: Build Clink files
         run: |
@@ -63,4 +63,4 @@ jobs:
           cp Lexicons/zh.clex out/assets/zh--zh.clex
           cp Lexicons/zh.cngm out/assets/zh--zh.cngm
           cp manifest.json out/manifest.json 2>/dev/null || true
-          gh release create "$VERSION" out/assets/* --draft --title "Clink 中文万象 v4 stable $VERSION" --notes "低内存稳定版测试：CIME 400k / CNGM 降低 / 保留英文、简拼、领域词。"
+          gh release create "$VERSION" out/assets/* --draft --title "Clink 中文万象 v4 stable $VERSION" --notes "性能优化版：降低卡顿，保留英文、简拼、领域词。"
