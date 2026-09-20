@@ -2,18 +2,6 @@ name: Build and publish Clink Chinese Wanxiang v3 nightly
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "23 4 * * *"
-  push:
-    branches: [main]
-    paths:
-      - "tools/build_zh_wanxiang_v3.py"
-      - "tools/build_zh_wanxiang_v2.py"
-      - "source/zh-latin-terms.tsv"
-      - "source/zh-domain-terms.tsv"
-      - "source/zh-shortcuts.tsv"
-      - "WANXIANG_V3.md"
-      - ".github/workflows/build-zh-wanxiang-v3.yml"
 
 permissions:
   contents: write
