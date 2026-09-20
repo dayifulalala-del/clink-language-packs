@@ -271,6 +271,7 @@ def main():
     ap.add_argument('--max-ime-readings', type=int, default=300000)
     ap.add_argument('--max-word-length', type=int, default=12)
     ap.add_argument('--max-following', type=int, default=48)
+    ap.add_argument('--compact-ime-only', action='store_true', help='Emit only compact canonical/full readings; do not add spaced or generated jianpin rows.')
     ap.add_argument('--single-char-ime-min-weight', type=float, default=200.0)
 
     ap.add_argument('--latin-terms', type=Path)
@@ -333,7 +334,7 @@ def main():
             if len(word) == 1 and weight < args.single_char_ime_min_weight:
                 continue
 
-            keys = {compact, spaced} if len(syllables) > 1 else {compact}
+            keys = {compact} if args.compact_ime_only else ({compact, spaced} if len(syllables) > 1 else {compact})
             if src == 'jichu':
                 core_compact_scores[compact] = max(core_compact_scores.get(compact, 0.0), score)
             for key in keys:
@@ -377,7 +378,8 @@ def main():
             freqs[lex] = max(freqs.get(lex, 0.0), max(30.0, weight))
             compact, spaced = ''.join(parts), ' '.join(parts)
             score = max(400.0, weight)
-            for key in ({compact, spaced} if len(parts) > 1 else {compact}):
+            mixed_keys = {compact} if args.compact_ime_only else ({compact, spaced} if len(parts) > 1 else {compact})
+            for key in mixed_keys:
                 add_candidate(readings, key, word, score, weight, seen)
                 protected.add(key)
 
@@ -396,7 +398,8 @@ def main():
             freqs[lex] = max(freqs.get(lex, 0.0), max(50.0, weight))
             compact, spaced = ''.join(parts), ' '.join(parts)
             score = max(800.0, weight * 2.0)
-            for key in ({compact, spaced} if len(parts) > 1 else {compact}):
+            custom_keys = {compact} if args.compact_ime_only else ({compact, spaced} if len(parts) > 1 else {compact})
+            for key in custom_keys:
                 add_candidate(readings, key, word, score, weight, seen)
                 protected.add(key)
 
@@ -418,7 +421,8 @@ def main():
             # Do not let a convenience shortcut distort CLEX frequency heavily.
             freqs[lex] = max(freqs.get(lex, 0.0), max(100.0, min(weight, 5000.0)))
             compact, spaced = ''.join(parts), ' '.join(parts)
-            for key in ({compact, spaced} if len(parts) > 1 else {compact}):
+            shortcut_keys = {compact} if args.compact_ime_only else ({compact, spaced} if len(parts) > 1 else {compact})
+            for key in shortcut_keys:
                 add_candidate(readings, key, word, 1_000_000_000.0 + weight, weight, seen)
                 protected.add(key)
 
@@ -497,23 +501,29 @@ def main():
             auto_typos += 1
         print(f'Added {auto_typos:,} collision-filtered automatic English typo aliases.')
 
-    # Add jianpin only after exact Pinyin/English/mixed keys are known. Never
-    # replace a real complete reading; exact keys keep their normal meaning.
-    jianpin_rows = []
-    forbidden_jianpin = set(readings)
-    for key, candidates in jianpin.items():
-        if key in forbidden_jianpin or len(key) < 2:
-            continue
-        strongest = max(meta[0] for meta in candidates.values())
-        jianpin_rows.append((key, strongest, candidates))
-    jianpin_rows.sort(key=lambda item: (-item[1], len(item[0]), item[0]))
-    if args.jianpin_limit:
-        jianpin_rows = jianpin_rows[:args.jianpin_limit]
-    for key, _strongest, candidates in jianpin_rows:
-        for word, meta in candidates.items():
-            add_candidate(readings, key, word, meta[0], meta[1], meta[2])
-        protected.add(key)
-    print(f'Added {len(jianpin_rows):,} non-conflicting jianpin readings.')
+    # Clink's Chinese runtime derives jianpin from ordinary Pinyin readings.
+    # Its official zh.cime contains compact full readings rather than explicit
+    # bzd/smj-style rows.  Keep that shape for the stable profile: generated
+    # jianpin rows add memory pressure and do not control runtime initial ranking.
+    if args.compact_ime_only:
+        jianpin_rows = []
+        print('Skipped explicit jianpin rows; Clink runtime derives initials from canonical readings.')
+    else:
+        jianpin_rows = []
+        forbidden_jianpin = set(readings)
+        for key, candidates in jianpin.items():
+            if key in forbidden_jianpin or len(key) < 2:
+                continue
+            strongest = max(meta[0] for meta in candidates.values())
+            jianpin_rows.append((key, strongest, candidates))
+        jianpin_rows.sort(key=lambda item: (-item[1], len(item[0]), item[0]))
+        if args.jianpin_limit:
+            jianpin_rows = jianpin_rows[:args.jianpin_limit]
+        for key, _strongest, candidates in jianpin_rows:
+            for word, meta in candidates.items():
+                add_candidate(readings, key, word, meta[0], meta[1], meta[2])
+            protected.add(key)
+        print(f'Added {len(jianpin_rows):,} non-conflicting jianpin readings.')
 
     # Reserve a large compact-only slice for ordinary Wanxiang jichu Pinyin.
     # Compact keys are what users physically type (e.g. dihao). Keeping these
