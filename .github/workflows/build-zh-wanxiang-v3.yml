@@ -210,6 +210,7 @@ jobs:
               'smjia':'什么价', 's m jia':'什么价',
               'smj':'什么价', 's m j':'什么价',
               'qujianma':'取件码', 'qu jian ma':'取件码',
+              'xunihao':'虚拟号', 'xu ni hao':'虚拟号',
               'yyds':'YYDS',
           }
           failed = []
