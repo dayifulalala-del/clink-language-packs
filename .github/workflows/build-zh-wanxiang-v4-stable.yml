@@ -1,17 +1,10 @@
-name: Build and publish Clink Chinese Wanxiang v4 stable
+name: Publish known-good Clink Chinese Wanxiang recovery
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "41 4 * * *"
   push:
     branches: [main]
     paths:
-      - "tools/build_zh_wanxiang_v3.py"
-      - "tools/build_zh_wanxiang_v2.py"
-      - "source/zh-latin-terms.tsv"
-      - "source/zh-domain-terms.tsv"
-      - "source/zh-shortcuts.tsv"
       - ".github/workflows/build-zh-wanxiang-v4-stable.yml"
 
 permissions:
@@ -22,11 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-publish:
+  publish-known-good:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       PYTHONUTF8: "1"
+      KNOWN_GOOD_TAG: vzh-wanxiang-v3-31-1
 
     steps:
       - name: Check out repository
@@ -42,119 +36,34 @@ jobs:
           printf -v run "%06d" "$GITHUB_RUN_NUMBER"
           echo "VERSION=vzh-wanxiang-v4-z${run}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
 
-      - name: Resolve and download current Wanxiang dict-nightly
-        id: upstream
+      - name: Restore exact known-good v3 assets
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          rm -rf _wanxiang_release _wanxiang_dicts
-          mkdir -p _wanxiang_release _wanxiang_dicts
+          rm -rf _known_good Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
+          mkdir -p _known_good Lexicons
 
-          gh api repos/amzxyz/rime-wanxiang/releases/tags/dict-nightly > _wanxiang_release/release.json
-          gh release download dict-nightly \
-            --repo amzxyz/rime-wanxiang \
-            --pattern base-dicts.zip \
-            --dir _wanxiang_release
+          gh release download "$KNOWN_GOOD_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'zh--zh.cime' \
+            --pattern 'zh--zh.clex' \
+            --pattern 'zh--zh.cngm' \
+            --pattern 'wanxiang-source.json' \
+            --dir _known_good
 
-          python3 - <<'PY'
-          import hashlib, json
-          from pathlib import Path
+          cp _known_good/zh--zh.cime Lexicons/zh.cime
+          cp _known_good/zh--zh.clex Lexicons/zh.clex
+          cp _known_good/zh--zh.cngm Lexicons/zh.cngm
 
-          root = Path('_wanxiang_release')
-          release = json.loads((root / 'release.json').read_text(encoding='utf-8'))
-          asset = next(a for a in release['assets'] if a['name'] == 'base-dicts.zip')
-          data = (root / 'base-dicts.zip').read_bytes()
-          actual = 'sha256:' + hashlib.sha256(data).hexdigest()
-          expected = asset.get('digest')
-          print('Wanxiang release id:', release['id'])
-          print('Wanxiang published:', release.get('published_at'))
-          print('asset digest:', expected)
-          print('local digest:', actual)
-          if expected and expected != actual:
-              raise SystemExit(f'asset digest mismatch: expected {expected}, got {actual}')
-          (root / 'current-sha256.txt').write_text(actual + '\n', encoding='utf-8')
-          PY
-
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            current_digest="$(cat _wanxiang_release/current-sha256.txt)"
-            latest_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
-            previous_digest=""
-
-            if [ -n "$latest_tag" ]; then
-              rm -rf _previous_release
-              mkdir -p _previous_release
-              if gh release download "$latest_tag" \
-                --repo "$GITHUB_REPOSITORY" \
-                --pattern wanxiang-source.json \
-                --dir _previous_release >/dev/null 2>&1; then
-                previous_digest="$(python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p = Path('_previous_release/wanxiang-source.json')
-          try:
-              data = json.loads(p.read_text(encoding='utf-8'))
-              print(data.get('asset', {}).get('sha256') or '')
-          except Exception:
-              print('')
-          PY
-          )"
-              fi
-            fi
-
-            echo "Current Wanxiang digest:  $current_digest"
-            echo "Previous release digest: ${previous_digest:-<none>}"
-            if [ -n "$previous_digest" ] && [ "$current_digest" = "$previous_digest" ]; then
-              echo "should_build=false" >> "$GITHUB_OUTPUT"
-              echo "Wanxiang data unchanged; scheduled release skipped."
-              exit 0
-            fi
-          fi
-
-          echo "should_build=true" >> "$GITHUB_OUTPUT"
-          unzip -q _wanxiang_release/base-dicts.zip -d _wanxiang_dicts
-
-      - name: Skip unchanged scheduled build
-        if: steps.upstream.outputs.should_build == 'false'
-        run: echo "No Wanxiang data change; no new v4 release required."
-
-      - name: Build stable profile
-        if: steps.upstream.outputs.should_build == 'true'
-        run: |
-          set -euo pipefail
-          rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm Lexicons/zh_cn.clex Lexicons/zh_cn.cime Lexicons/zh_cn.cngm Lexicons/zh.bpevocab Lexicons/zh.mlmodelc Lexicons/zh_cn.bpevocab Lexicons/zh_cn.mlmodelc
-          python3 tools/build_zh_wanxiang_v3.py \
-            --dict-root _wanxiang_dicts \
-            --code zh \
-            --out-dir source \
-            --lexicon-limit 650000 \
-            --max-ime-readings 650000 \
-            --max-candidates 16 \
-            --max-word-length 16 \
-            --max-following 32 \
-            --single-char-ime-min-weight 1 \
-            --latin-terms source/zh-latin-terms.tsv \
-            --custom-terms source/zh-domain-terms.tsv \
-            --shortcut-terms source/zh-shortcuts.tsv \
-            --english-limit 20000 \
-            --english-typo-limit 2500 \
-            --jianpin-limit 50000 \
-            --core-compact-reading-budget 450000 \
-            --receipt-json source/zh-wanxiang-build.json
-
-      - name: Build Clink files
-        if: steps.upstream.outputs.should_build == 'true'
-        run: |
-          set -euo pipefail
-          python3 build-pack.py zh source/zh.txt
-          python3 tools/build-ime-table.py zh source/zh-ime.tsv
-          python3 tools/validate-pack.py zh
+          echo "Known-good v3 assets restored byte-for-byte:"
+          sha256sum Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
           ls -lh Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
 
-      - name: Stable profile regression tests
-        if: steps.upstream.outputs.should_build == 'true'
+      - name: Validate restored pack and known-good behavior
         run: |
+          set -euo pipefail
+          python3 tools/validate-pack.py zh
           python3 - <<'PY'
           from pathlib import Path
 
@@ -164,38 +73,31 @@ jobs:
               if len(fields) >= 2:
                   rows[fields[0]] = fields[1:]
 
-          expected = {
-              'pinyin':'拼音', 'pin yin':'拼音',
-              'nihao':'你好', 'ni hao':'你好',
-              'weishenme':'为什么', 'wei shen me':'为什么',
-              'buzhidao':'不知道', 'bu zhi dao':'不知道',
-              'github':'GitHub', 'githbu':'GitHub',
-              'chatgpt':'ChatGPT', 'chatgtp':'ChatGPT',
-              'codex':'Codex', 'codxe':'Codex',
-              'openai':'OpenAI',
-              'docker':'Docker', 'doker':'Docker',
-              'python':'Python', 'pyhton':'Python',
-              'appstore':'App Store', 'appsrore':'App Store',
+          exact = {
+              'pinyin':'拼音',
+              'nihao':'你好',
               'dihao':'帝豪',
               'jilidihao':'吉利帝豪',
-              'kjzl':'快捷指令', 'k j z l':'快捷指令',
-              'smjia':'什么价', 's m jia':'什么价',
-              'smj':'什么价', 's m j':'什么价',
-              'qujianma':'取件码', 'qu jian ma':'取件码',
-              'xunihao':'虚拟号', 'xu ni hao':'虚拟号',
+              'kjzl':'快捷指令',
+              'smj':'什么价',
+              'smjia':'什么价',
+              'qujianma':'取件码',
+              'xunihao':'虚拟号',
+              'github':'GitHub',
+              'appsrore':'App Store',
           }
-          failed = []
-          for key, want in expected.items():
-              got = rows.get(key, [])
-              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
-              if not got or got[0] != want:
-                  failed.append((key, want, got[:8]))
-
           contains = {
               'bzd':'不知道',
               'wsm':'为什么',
               'zmhs':'怎么回事',
           }
+
+          failed = []
+          for key, want in exact.items():
+              got = rows.get(key, [])
+              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
+              if not got or got[0] != want:
+                  failed.append((key, want, got[:8]))
           for key, want in contains.items():
               got = rows.get(key, [])
               print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
@@ -204,43 +106,29 @@ jobs:
 
           if len(rows) < 600000:
               failed.append(('IME table unexpectedly small', len(rows)))
-
           if failed:
-              raise SystemExit('v4 stable regression failure: ' + repr(failed))
-          print('IME readings:', len(rows))
+              raise SystemExit('Known-good recovery regression failure: ' + repr(failed))
+          print('Known-good IME readings:', len(rows))
           PY
 
-      - name: Create Wanxiang source receipt
-        if: steps.upstream.outputs.should_build == 'true'
+      - name: Create recovery source receipt
         run: |
           python3 - <<'PY'
           import json
           from pathlib import Path
 
-          release = json.loads(Path('_wanxiang_release/release.json').read_text(encoding='utf-8'))
-          build = json.loads(Path('source/zh-wanxiang-build.json').read_text(encoding='utf-8'))
-          asset = next(a for a in release['assets'] if a['name'] == 'base-dicts.zip')
+          old = json.loads(Path('_known_good/wanxiang-source.json').read_text(encoding='utf-8'))
           receipt = {
-              'profile': 'v4-stable',
-              'upstream': 'amzxyz/rime-wanxiang',
-              'tag': 'dict-nightly',
-              'releaseId': release['id'],
-              'publishedAt': release.get('published_at'),
-              'targetCommitish': release.get('target_commitish'),
-              'asset': {
-                  'name': asset['name'],
-                  'byteCount': asset['size'],
-                  'sha256': asset.get('digest'),
-                  'url': asset['browser_download_url'],
-              },
-              'build': build,
+              'profile': 'v4-recovery-known-good-v3',
+              'recoveryFromTag': 'vzh-wanxiang-v3-31-1',
+              'note': 'Assets are copied byte-for-byte from the user-verified known-good v3 release.',
+              'knownGoodSourceReceipt': old,
           }
           Path('wanxiang-source.json').write_text(
               json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
           PY
 
-      - name: Build Clink release manifest
-        if: steps.upstream.outputs.should_build == 'true'
+      - name: Build manifest containing only restored zh
         run: |
           set -euo pipefail
           find Lexicons -mindepth 1 -maxdepth 1 \
@@ -260,11 +148,10 @@ jobs:
           assert [p['code'] for p in m['packs']] == ['zh'], m
           assets = {a['path'] for a in m['packs'][0]['assets']}
           assert assets == {'zh.cime','zh.clex','zh.cngm'}, assets
-          print('Manifest verified for zh:', sorted(assets))
+          print('Recovery manifest verified:', m['version'], sorted(assets))
           PY
 
-      - name: Publish v4 stable as latest
-        if: steps.upstream.outputs.should_build == 'true'
+      - name: Publish recovery as latest
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -272,8 +159,8 @@ jobs:
           gh release create "$VERSION" \
             --target "$GITHUB_SHA" \
             --draft \
-            --title "Clink 中文万象 v4 stable — $VERSION" \
-            --notes "iOS 稳定版：优先中文核心覆盖，降低 CNGM/候选压力；保留简拼、英文、中英混输、纠错、领域词和快捷词。"
+            --title "Clink 中文万象 v4 recovery — $VERSION" \
+            --notes "恢复用户已验证正常的 v3-31-1 三个语言资产，字节级不改动；只重新生成当前版本 manifest，排除 v4 构建参数造成的行为差异。"
 
           gh release upload "$VERSION" \
             out/assets/zh--zh.cime \
@@ -284,8 +171,7 @@ jobs:
 
           gh release edit "$VERSION" --draft=false --latest
 
-      - name: Verify published release
-        if: steps.upstream.outputs.should_build == 'true'
+      - name: Verify published bytes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -293,8 +179,13 @@ jobs:
           rm -rf "$RUNNER_TEMP/release-check"
           mkdir -p "$RUNNER_TEMP/release-check"
           gh release download "$VERSION" --dir "$RUNNER_TEMP/release-check"
+
           cmp out/manifest.json "$RUNNER_TEMP/release-check/manifest.json"
           cmp wanxiang-source.json "$RUNNER_TEMP/release-check/wanxiang-source.json"
+          cmp Lexicons/zh.cime "$RUNNER_TEMP/release-check/zh--zh.cime"
+          cmp Lexicons/zh.clex "$RUNNER_TEMP/release-check/zh--zh.clex"
+          cmp Lexicons/zh.cngm "$RUNNER_TEMP/release-check/zh--zh.cngm"
+
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
           test "$latest" = "$VERSION"
-          echo "Verified latest release: $latest"
+          echo "Verified recovery latest release: $latest"
