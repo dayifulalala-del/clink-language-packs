@@ -1,11 +1,7 @@
 # candidate	reading	weight
-# Stable Clink Chinese shortcuts use canonical/full Pinyin readings. Clink's
-# runtime derives jianpin (for example kjzl or smj) from these readings.
-快捷指令	kuai jie zhi ling	12000
-什么价	shen me jia	1000000
-取件码	qu jian ma	12000
-虚拟号	xu ni hao	12000
-
-# Temporary single-syllable smoke test. Type "weng": if this community CIME is
-# active, this exact candidate must appear first. Remove after device validation.
-万象包已生效	weng	9999999
+# Proven v3 shortcut format. The builder emits both compact and spaced aliases.
+快捷指令	k j z l	10000
+什么价	s m jia	10000
+什么价	s m j	11000
+取件码	qu jian ma	10000
+虚拟号	xu ni hao	10000
