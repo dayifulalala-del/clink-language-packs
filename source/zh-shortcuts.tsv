@@ -1,5 +1,5 @@
-# candidate	reading	weight
-# Proven v3 shortcut format. The builder emits both compact and spaced aliases.
+# candidate<TAB>reading<TAB>weight
+# Explicit user shortcuts. These override normal jianpin ranking for the same reading.
 快捷指令	k j z l	10000
 什么价	s m jia	10000
 什么价	s m j	11000
