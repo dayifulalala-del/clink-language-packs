@@ -169,6 +169,8 @@ jobs:
               's m j':'什么价',
               'smjia':'什么价',
               's m jia':'什么价',
+              'shenmejia':'什么价',
+              'shen me jia':'什么价',
               'qujianma':'取件码',
               'qu jian ma':'取件码',
               'xunihao':'虚拟号',
@@ -198,6 +200,27 @@ jobs:
 
           if len(rows) < 550000:
               failed.append(('IME table unexpectedly small', len(rows)))
+
+          # Clink can re-rank partial-initial composition using CLEX frequency
+          # instead of the literal smj CIME row. Ensure the canonical phrase
+          # "什么价" remains much stronger than "什么叫" for that path.
+          freqs = {}
+          for raw in Path('source/zh_cn.txt').read_text(encoding='utf-8').splitlines():
+              if not raw or raw.startswith('#'):
+                  continue
+              fields = raw.split('\t')
+              if len(fields) >= 2:
+                  try:
+                      freqs[fields[0]] = float(fields[1])
+                  except ValueError:
+                      pass
+          print('CLEX source 什么价:', freqs.get('什么价'))
+          print('CLEX source 什么叫:', freqs.get('什么叫'))
+          if freqs.get('什么价', 0) < 1000000:
+              failed.append(('什么价 frequency too low', freqs.get('什么价')))
+          if freqs.get('什么价', 0) <= freqs.get('什么叫', 0):
+              failed.append(('什么价 must outrank 什么叫 for partial-Pinyin ranking',
+                             freqs.get('什么价'), freqs.get('什么叫')))
 
           if failed:
               raise SystemExit('v4 stable regression failure: ' + repr(failed))
