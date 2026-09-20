@@ -136,7 +136,7 @@ jobs:
             --code zh \
             --out-dir source \
             --lexicon-limit 650000 \
-            --max-ime-readings 500000 \
+            --max-ime-readings 650000 \
             --max-candidates 16 \
             --max-word-length 16 \
             --max-following 64 \
@@ -147,6 +147,7 @@ jobs:
             --english-limit 20000 \
             --english-typo-limit 2500 \
             --jianpin-limit 50000 \
+            --core-compact-reading-budget 450000 \
             --receipt-json source/zh-wanxiang-build.json
 
       - name: Build CLEX and CIME with Clink official tools
@@ -206,6 +207,8 @@ jobs:
               'spotify':'Spotify',
               'githubcopilot':'GitHub Copilot',
               'ruanluyou':'软路由',
+              'dihao':'帝豪',
+              'jilidihao':'吉利帝豪',
               'kjzl':'快捷指令', 'k j z l':'快捷指令',
               'smjia':'什么价', 's m jia':'什么价',
               'smj':'什么价', 's m j':'什么价',
@@ -250,7 +253,7 @@ jobs:
               if not any(line.split('\t', 1)[0] == word for line in lex_source.splitlines() if line and not line.startswith('#')):
                   failed.append(('CLEX source missing Latin term', word))
 
-          if len(rows) < 100000:
+          if len(rows) < 600000:
               failed.append(('IME table unexpectedly small', len(rows)))
           if failed:
               raise SystemExit('Production regression failure: ' + repr(failed))
