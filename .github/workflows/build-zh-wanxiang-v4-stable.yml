@@ -35,7 +35,7 @@ jobs:
             --code zh \
             --out-dir source \
             --lexicon-limit 600000 \
-            --max-ime-readings 500000 \
+            --max-ime-readings 600000 \
             --max-candidates 12 \
             --max-word-length 16 \
             --max-following 32 \
