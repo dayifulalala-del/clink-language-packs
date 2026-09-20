@@ -276,6 +276,7 @@ def main():
     ap.add_argument('--english-typo-limit', type=int, default=2500)
     ap.add_argument('--mixed-dict', type=Path)
     ap.add_argument('--custom-terms', type=Path)
+    ap.add_argument('--shortcut-terms', type=Path)
 
     ap.add_argument('--jianpin-limit', type=int, default=50000)
     ap.add_argument('--jianpin-min-weight', type=float, default=20.0)
@@ -387,6 +388,28 @@ def main():
             score = max(800.0, weight * 2.0)
             for key in ({compact, spaced} if len(parts) > 1 else {compact}):
                 add_candidate(readings, key, word, score, weight, seen)
+                protected.add(key)
+
+    # Explicit user shortcuts. These are intentionally stronger than normal
+    # jianpin/domain candidates, while keeping ordinary lexicon frequency modest.
+    # A spaced shortcut such as "k j z l" generates both "kjzl" and
+    # "k j z l", matching Clink's observed syllable/initial segmentation.
+    if args.shortcut_terms:
+        if not args.shortcut_terms.is_file():
+            raise SystemExit(f'Shortcut terms file not found: {args.shortcut_terms}')
+        print(f'Reading explicit shortcut terms {args.shortcut_terms} ...')
+        for word, raw_reading, weight, _lineno in parse_custom_terms(args.shortcut_terms):
+            parts = normalize_mixed_code(raw_reading)
+            if not parts:
+                continue
+            seen += 1
+            lex = word.lower()
+            candidate_lexicon[word] = lex
+            # Do not let a convenience shortcut distort CLEX frequency heavily.
+            freqs[lex] = max(freqs.get(lex, 0.0), max(100.0, min(weight, 5000.0)))
+            compact, spaced = ''.join(parts), ' '.join(parts)
+            for key in ({compact, spaced} if len(parts) > 1 else {compact}):
+                add_candidate(readings, key, word, 1_000_000_000.0 + weight, weight, seen)
                 protected.add(key)
 
     # High-frequency English exact words from Wanxiang en.dict.yaml.
