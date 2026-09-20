@@ -282,6 +282,7 @@ def main():
     ap.add_argument('--shortcut-terms', type=Path)
 
     ap.add_argument('--jianpin-limit', type=int, default=50000)
+    ap.add_argument('--core-compact-reading-budget', type=int, default=450000)
     ap.add_argument('--jianpin-min-weight', type=float, default=20.0)
     ap.add_argument('--jianpin-prefix-min-weight', type=float, default=200.0)
     ap.add_argument('--jianpin-max-syllables', type=int, default=8)
@@ -305,6 +306,10 @@ def main():
     }
     special_scores: dict[str, float] = {}
     long_scores: dict[str, float] = {}
+    # Normal compact Pinyin from Wanxiang jichu is the backbone of the pack.
+    # Track it separately so feature layers (jianpin/English/typos/etc.) cannot
+    # crowd ordinary words out of the finite CIME reading budget.
+    core_compact_scores: dict[str, float] = {}
     seen = 0
 
     for path in args.inputs:
@@ -329,6 +334,8 @@ def main():
                 continue
 
             keys = {compact, spaced} if len(syllables) > 1 else {compact}
+            if src == 'jichu':
+                core_compact_scores[compact] = max(core_compact_scores.get(compact, 0.0), score)
             for key in keys:
                 add_candidate(readings, key, word, score, weight, seen)
                 if src in TOLERANCE_SOURCES:
@@ -507,6 +514,22 @@ def main():
             add_candidate(readings, key, word, meta[0], meta[1], meta[2])
         protected.add(key)
     print(f'Added {len(jianpin_rows):,} non-conflicting jianpin readings.')
+
+    # Reserve a large compact-only slice for ordinary Wanxiang jichu Pinyin.
+    # Compact keys are what users physically type (e.g. dihao). Keeping these
+    # before spaced duplicates gives much broader vocabulary coverage at nearly
+    # the same package size.
+    core_compact_ranked = sorted(
+        core_compact_scores,
+        key=lambda r: (-core_compact_scores[r], len(r), r),
+    )
+    if args.core_compact_reading_budget:
+        core_compact_ranked = core_compact_ranked[:args.core_compact_reading_budget]
+    protected.update(core_compact_ranked)
+    print(
+        f'Protected {len(core_compact_ranked):,} compact jichu readings '
+        f'for baseline Chinese coverage.'
+    )
 
     # Protect the highest-signal names/places and long-phrase readings so a
     # global size budget cannot silently erase these requested categories.
