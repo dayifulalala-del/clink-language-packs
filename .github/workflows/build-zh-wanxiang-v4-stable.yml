@@ -119,10 +119,10 @@ jobs:
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           set -euo pipefail
-          rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm Lexicons/zh.bpevocab Lexicons/zh.mlmodelc
+          rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm Lexicons/zh_cn.clex Lexicons/zh_cn.cime Lexicons/zh_cn.cngm Lexicons/zh.bpevocab Lexicons/zh.mlmodelc Lexicons/zh_cn.bpevocab Lexicons/zh_cn.mlmodelc
           python3 tools/build_zh_wanxiang_v3.py \
             --dict-root _wanxiang_dicts \
-            --code zh \
+            --code zh_cn \
             --out-dir source \
             --lexicon-limit 600000 \
             --max-ime-readings 600000 \
@@ -136,16 +136,16 @@ jobs:
             --english-typo-limit 2500 \
             --jianpin-limit 30000 \
             --core-compact-reading-budget 400000 \
-            --receipt-json source/zh-wanxiang-build.json
+            --receipt-json source/zh_cn-wanxiang-build.json
 
       - name: Build Clink files
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           set -euo pipefail
-          python3 build-pack.py zh source/zh.txt
-          python3 tools/build-ime-table.py zh source/zh-ime.tsv
-          python3 tools/validate-pack.py zh
-          ls -lh Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
+          python3 build-pack.py zh_cn source/zh_cn.txt
+          python3 tools/build-ime-table.py zh_cn source/zh_cn-ime.tsv
+          python3 tools/validate-pack.py zh_cn
+          ls -lh Lexicons/zh_cn.cime Lexicons/zh_cn.clex Lexicons/zh_cn.cngm
 
       - name: Stable profile regression tests
         if: steps.upstream.outputs.should_build == 'true'
@@ -154,7 +154,7 @@ jobs:
           from pathlib import Path
 
           rows = {}
-          for raw in Path('Lexicons/zh.cime').read_text(encoding='utf-8').splitlines():
+          for raw in Path('Lexicons/zh_cn.cime').read_text(encoding='utf-8').splitlines():
               fields = raw.split('\t')
               if len(fields) >= 2:
                   rows[fields[0]] = fields[1:]
@@ -212,7 +212,7 @@ jobs:
           from pathlib import Path
 
           release = json.loads(Path('_wanxiang_release/release.json').read_text(encoding='utf-8'))
-          build = json.loads(Path('source/zh-wanxiang-build.json').read_text(encoding='utf-8'))
+          build = json.loads(Path('source/zh_cn-wanxiang-build.json').read_text(encoding='utf-8'))
           asset = next(a for a in release['assets'] if a['name'] == 'base-dicts.zip')
           receipt = {
               'profile': 'v4-stable',
@@ -238,9 +238,9 @@ jobs:
         run: |
           set -euo pipefail
           find Lexicons -mindepth 1 -maxdepth 1 \
-            ! -name 'zh.clex' \
-            ! -name 'zh.cime' \
-            ! -name 'zh.cngm' \
+            ! -name 'zh_cn.clex' \
+            ! -name 'zh_cn.cime' \
+            ! -name 'zh_cn.cngm' \
             -exec rm -rf {} +
 
           rm -rf out
@@ -251,10 +251,10 @@ jobs:
           import json
           from pathlib import Path
           m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
-          assert [p['code'] for p in m['packs']] == ['zh'], m
+          assert [p['code'] for p in m['packs']] == ['zh_cn'], m
           assets = {a['path'] for a in m['packs'][0]['assets']}
-          assert assets == {'zh.cime','zh.clex','zh.cngm'}, assets
-          print('Manifest verified for zh:', sorted(assets))
+          assert assets == {'zh_cn.cime','zh_cn.clex','zh_cn.cngm'}, assets
+          print('Manifest verified for zh_cn:', sorted(assets))
           PY
 
       - name: Publish v4 stable as latest
@@ -266,13 +266,13 @@ jobs:
           gh release create "$VERSION" \
             --target "$GITHUB_SHA" \
             --draft \
-            --title "Clink 中文万象 v4 stable — $VERSION" \
-            --notes "iOS 稳定版：优先中文核心覆盖，降低 CNGM/候选压力；保留简拼、英文、中英混输、纠错、领域词和快捷词。"
+            --title "Clink 中文万象 v4 stable (zh_cn) — $VERSION" \
+            --notes "iOS 稳定版（独立语言代码 zh_cn，避免与官方 zh 冲突）：优先中文核心覆盖，降低 CNGM/候选压力；保留简拼、英文、中英混输、纠错、领域词和快捷词。"
 
           gh release upload "$VERSION" \
-            out/assets/zh--zh.cime \
-            out/assets/zh--zh.clex \
-            out/assets/zh--zh.cngm \
+            out/assets/zh_cn--zh_cn.cime \
+            out/assets/zh_cn--zh_cn.clex \
+            out/assets/zh_cn--zh_cn.cngm \
             out/manifest.json \
             wanxiang-source.json
 
