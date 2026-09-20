@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 45
     env:
       PYTHONUTF8: "1"
-      VERSION: vzh-wanxiang-v4-${{ github.run_number }}-${{ github.run_attempt }}
 
     steps:
       - name: Check out repository
@@ -37,6 +36,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+
+      - name: Set lexically sortable release version
+        run: |
+          printf -v run "%06d" "$GITHUB_RUN_NUMBER"
+          echo "VERSION=vzh-wanxiang-v4-z${run}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
 
       - name: Resolve and download current Wanxiang dict-nightly
         id: upstream
