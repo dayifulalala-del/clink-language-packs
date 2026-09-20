@@ -1,0 +1,66 @@
+name: Build Clink Chinese Wanxiang v4 stable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VERSION: vzh-wanxiang-v4-${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Download Wanxiang nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _wanxiang_dicts
+          gh release download dict-nightly --repo amzxyz/rime-wanxiang --pattern base-dicts.zip --dir .
+          unzip -q base-dicts.zip -d _wanxiang_dicts
+
+      - name: Build stable profile
+        run: |
+          rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm
+          python3 tools/build_zh_wanxiang_v3.py \
+            --dict-root _wanxiang_dicts \
+            --code zh \
+            --out-dir source \
+            --lexicon-limit 600000 \
+            --max-ime-readings 400000 \
+            --max-candidates 12 \
+            --max-word-length 16 \
+            --max-following 32 \
+            --latin-terms source/zh-latin-terms.tsv \
+            --custom-terms source/zh-domain-terms.tsv \
+            --shortcut-terms source/zh-shortcuts.tsv \
+            --english-limit 30000 \
+            --english-typo-limit 5000 \
+            --jianpin-limit 30000 \
+            --core-compact-reading-budget 300000
+
+      - name: Build Clink files
+        run: |
+          python3 build-pack.py zh source/zh.txt
+          python3 tools/build-ime-table.py zh source/zh-ime.tsv
+          python3 tools/validate-pack.py zh
+          ls -lh Lexicons/zh.*
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out/assets
+          cp Lexicons/zh.cime out/assets/zh--zh.cime
+          cp Lexicons/zh.clex out/assets/zh--zh.clex
+          cp Lexicons/zh.cngm out/assets/zh--zh.cngm
+          cp manifest.json out/manifest.json 2>/dev/null || true
+          gh release create "$VERSION" out/assets/* --draft --title "Clink 中文万象 v4 stable $VERSION" --notes "低内存稳定版测试：CIME 400k / CNGM 降低 / 保留英文、简拼、领域词。"
