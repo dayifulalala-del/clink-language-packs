@@ -77,6 +77,7 @@ def main() -> None:
     p.add_argument("--english-limit", type=int, default=20000)
     p.add_argument("--english-typo-limit", type=int, default=2500)
     p.add_argument("--jianpin-limit", type=int, default=50000)
+    p.add_argument("--core-compact-reading-budget", type=int, default=450000)
     p.add_argument("--receipt-json", type=Path)
     args = p.parse_args()
 
@@ -103,6 +104,7 @@ def main() -> None:
         "--english-typo-limit", str(args.english_typo_limit),
         "--mixed-dict", str(mixed_dict),
         "--jianpin-limit", str(args.jianpin_limit),
+        "--core-compact-reading-budget", str(args.core_compact_reading_budget),
     ]
     if args.latin_terms:
         if not args.latin_terms.is_file():
@@ -177,6 +179,7 @@ def main() -> None:
                 "englishLimit": args.english_limit,
                 "englishTypoLimit": args.english_typo_limit,
                 "jianpinLimit": args.jianpin_limit,
+                "coreCompactReadingBudget": args.core_compact_reading_budget,
             },
         }
         args.receipt_json.parent.mkdir(parents=True, exist_ok=True)
