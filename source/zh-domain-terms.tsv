@@ -164,3 +164,6 @@ B站	b zhan	6500
 # Keep canonical full Pinyin here as well as shortcut aliases: the keyboard may
 # expand initials (smj) into shen/me/j... before consulting the CIME table.
 什么价	shen me jia	1000000
+
+# Temporary on-device smoke-test phrase; remove after confirming the community pack is active.
+万象包已生效	wan xiang bao yi sheng xiao	1000000
