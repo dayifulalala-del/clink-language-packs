@@ -9,7 +9,7 @@
 - Community `zh` 会进入 Clink 的中文 Pinyin IME；
 - Community `zh.cime` 确实参与候选生成；
 - Clink 会把连续全拼自动切成带空格的音节序列；
-- 正式包同时保留 compact 与 syllable-spaced 两种全拼 reading。
+- 构建阶段同时生成 compact 与 syllable-spaced 两种全拼 reading；在有限的手机端预算内，优先保留用户实际连续输入使用的 compact reading，并保留高价值/回归所需的 spaced reading。
 
 正式版不包含任何“万象验证甲/乙/丙”诊断候选。
 
@@ -139,9 +139,14 @@ v3 以 `base-dicts.zip` 实际内容为准。核心 `zi / jichu / lianxiang` 必
 
 ## 当前体积策略
 
-万象原始数据远大于手机键盘实际需要，v3 采用“完整 nightly 数据源 + Clink 高信号裁剪”：
+万象原始数据远大于手机键盘实际需要。一次不裁剪的诊断构建会产生约 385 万个 CIME reading、约 214 万词条，仅 IME TSV 就约 112 MB，因此不能简单把全部上游数据原样塞进 iOS 键盘。
 
-- CIME：最多 500,000 个 reading；
+当前改为“基础中文优先 + 增强层共享剩余预算”：
+
+- CIME：最多 650,000 个 reading；
+- 其中优先保护万象 `jichu` 权重最高的 450,000 个 **compact 全拼 reading**；
+- compact reading 是连续输入形式，例如 `dihao`；它比同时保留大量 `di hao` 重复键更节省预算；
+- 地名/人名、错音/多音、长词、中英混输、英文、英文纠错、简拼和项目自维护快捷词仍保留各自的保护策略；
 - 每个 reading：最多 16 个候选；
 - 自动简拼：最多 50,000 个非冲突 reading；
 - 高频英文：20,000 个；
@@ -151,11 +156,16 @@ v3 以 `base-dicts.zip` 实际内容为准。核心 `zi / jichu / lianxiang` 必
 - CLEX 与 CNGM 使用同一最终词表；
 - 不复用 Clink 官方旧 neural model。
 
+这次调整专门解决了“万象里明明有正常词，但被全局 reading 截断挤掉”的问题。例如当前万象 `jichu` 中本来就有 `帝豪 / dì háo / 490`；旧策略下 `dihao` 会落到 50 万预算之外，新策略下已验证：
+
+- `dihao` → 帝豪 / 帝号 / 低耗；
+- `jilidihao` → 吉利帝豪。
+
 当前一次完整构建约得到：
 
-- 500,000 个 CIME reading；
-- 约 91 万个 CLEX 词条；
-- 约 109 万条 CNGM 转移。
+- 650,000 个 CIME reading；
+- 约 93 万个 CLEX 词条；
+- 约 110 万条 CNGM 转移。
 
 ## 必过回归
 
@@ -171,6 +181,8 @@ Release 发布前必须同时通过全拼、简拼、英文、纠错、错音、
 - `githubcangku` → Github仓库；
 - `heilongjiang` → 黑龙江；
 - `ruanluyou` → 软路由；
+- `dihao` → 帝豪；
+- `jilidihao` → 吉利帝豪；
 - `yyds` → YYDS / 永远的神；
 - `pin` 前 5 不得出现“穦”；
 - Release 不得出现任何旧“万象验证”诊断候选；
