@@ -11,6 +11,7 @@ on:
       - "tools/build_zh_wanxiang_v2.py"
       - "source/zh-latin-terms.tsv"
       - "source/zh-domain-terms.tsv"
+      - "source/zh-shortcuts.tsv"
       - "WANXIANG_V3.md"
       - ".github/workflows/build-zh-wanxiang-v3.yml"
 
@@ -142,6 +143,7 @@ jobs:
             --single-char-ime-min-weight 1 \
             --latin-terms source/zh-latin-terms.tsv \
             --custom-terms source/zh-domain-terms.tsv \
+            --shortcut-terms source/zh-shortcuts.tsv \
             --english-limit 20000 \
             --english-typo-limit 2500 \
             --jianpin-limit 50000 \
@@ -195,7 +197,8 @@ jobs:
               'computer':'computer',
               'compuer':'computer',
               'ruanluyou':'软路由',
-              'kjzl':'快捷指令',
+              'kjzl':'快捷指令', 'k j z l':'快捷指令',
+              'smjia':'什么价', 's m jia':'什么价',
               'yyds':'YYDS',
           }
           failed = []
