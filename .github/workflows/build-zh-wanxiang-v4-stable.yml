@@ -48,17 +48,16 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --pattern 'zh--zh.cime' \
             --pattern 'zh--zh.clex' \
-            --pattern 'zh--zh.cngm' \
             --pattern 'wanxiang-source.json' \
             --dir _known_good
 
           cp _known_good/zh--zh.cime Lexicons/zh.cime
           cp _known_good/zh--zh.clex Lexicons/zh.clex
-          cp _known_good/zh--zh.cngm Lexicons/zh.cngm
+          rm -f Lexicons/zh.cngm
 
-          echo "Known-good v3 assets restored byte-for-byte:"
-          sha256sum Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
-          ls -lh Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
+          echo "Known-good v3 CIME/CLEX restored byte-for-byte; CNGM intentionally omitted:"
+          sha256sum Lexicons/zh.cime Lexicons/zh.clex
+          ls -lh Lexicons/zh.cime Lexicons/zh.clex
 
       - name: Validate restored pack and known-good behavior
         run: |
@@ -119,9 +118,9 @@ jobs:
 
           old = json.loads(Path('_known_good/wanxiang-source.json').read_text(encoding='utf-8'))
           receipt = {
-              'profile': 'v4-recovery-known-good-v3',
+              'profile': 'v4-lite-known-good-v3-ime',
               'recoveryFromTag': 'vzh-wanxiang-v3-31-1',
-              'note': 'Assets are copied byte-for-byte from the user-verified known-good v3 release.',
+              'note': 'CIME and CLEX are byte-for-byte from the user-verified known-good v3 release; CNGM is intentionally omitted to reduce runtime memory/CPU pressure.',
               'knownGoodSourceReceipt': old,
           }
           Path('wanxiang-source.json').write_text(
@@ -134,7 +133,6 @@ jobs:
           find Lexicons -mindepth 1 -maxdepth 1 \
             ! -name 'zh.clex' \
             ! -name 'zh.cime' \
-            ! -name 'zh.cngm' \
             -exec rm -rf {} +
 
           rm -rf out
@@ -147,8 +145,8 @@ jobs:
           m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
           assert [p['code'] for p in m['packs']] == ['zh'], m
           assets = {a['path'] for a in m['packs'][0]['assets']}
-          assert assets == {'zh.cime','zh.clex','zh.cngm'}, assets
-          print('Recovery manifest verified:', m['version'], sorted(assets))
+          assert assets == {'zh.cime','zh.clex'}, assets
+          print('Lite manifest verified:', m['version'], sorted(assets))
           PY
 
       - name: Publish recovery as latest
@@ -159,13 +157,12 @@ jobs:
           gh release create "$VERSION" \
             --target "$GITHUB_SHA" \
             --draft \
-            --title "Clink 中文万象 v4 recovery — $VERSION" \
-            --notes "恢复用户已验证正常的 v3-31-1 三个语言资产，字节级不改动；只重新生成当前版本 manifest，排除 v4 构建参数造成的行为差异。"
+            --title "Clink 中文万象 v4 lite — $VERSION" \
+            --notes "精简版：CIME/CLEX 与已验证正常的 v3-31-1 字节级一致，保证拼音/简拼/词典行为不变；移除可选 CNGM 下一词模型，优先降低键盘内存和运行压力。"
 
           gh release upload "$VERSION" \
             out/assets/zh--zh.cime \
             out/assets/zh--zh.clex \
-            out/assets/zh--zh.cngm \
             out/manifest.json \
             wanxiang-source.json
 
@@ -184,8 +181,8 @@ jobs:
           cmp wanxiang-source.json "$RUNNER_TEMP/release-check/wanxiang-source.json"
           cmp Lexicons/zh.cime "$RUNNER_TEMP/release-check/zh--zh.cime"
           cmp Lexicons/zh.clex "$RUNNER_TEMP/release-check/zh--zh.clex"
-          cmp Lexicons/zh.cngm "$RUNNER_TEMP/release-check/zh--zh.cngm"
+          test ! -e "$RUNNER_TEMP/release-check/zh--zh.cngm"
 
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
           test "$latest" = "$VERSION"
-          echo "Verified recovery latest release: $latest"
+          echo "Verified lite latest release: $latest"
