@@ -122,30 +122,31 @@ jobs:
           rm -rf Lexicons/zh.clex Lexicons/zh.cime Lexicons/zh.cngm Lexicons/zh_cn.clex Lexicons/zh_cn.cime Lexicons/zh_cn.cngm Lexicons/zh.bpevocab Lexicons/zh.mlmodelc Lexicons/zh_cn.bpevocab Lexicons/zh_cn.mlmodelc
           python3 tools/build_zh_wanxiang_v3.py \
             --dict-root _wanxiang_dicts \
-            --code zh_cn \
+            --code zh \
             --out-dir source \
             --lexicon-limit 600000 \
-            --max-ime-readings 600000 \
+            --max-ime-readings 160000 \
             --max-candidates 12 \
             --max-word-length 16 \
             --max-following 32 \
+            --compact-ime-only \
             --latin-terms source/zh-latin-terms.tsv \
             --custom-terms source/zh-domain-terms.tsv \
             --shortcut-terms source/zh-shortcuts.tsv \
-            --english-limit 20000 \
-            --english-typo-limit 2500 \
-            --jianpin-limit 30000 \
-            --core-compact-reading-budget 400000 \
-            --receipt-json source/zh_cn-wanxiang-build.json
+            --english-limit 15000 \
+            --english-typo-limit 1000 \
+            --jianpin-limit 0 \
+            --core-compact-reading-budget 130000 \
+            --receipt-json source/zh-wanxiang-build.json
 
       - name: Build Clink files
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           set -euo pipefail
-          python3 build-pack.py zh_cn source/zh_cn.txt
-          python3 tools/build-ime-table.py zh_cn source/zh_cn-ime.tsv
-          python3 tools/validate-pack.py zh_cn
-          ls -lh Lexicons/zh_cn.cime Lexicons/zh_cn.clex Lexicons/zh_cn.cngm
+          python3 build-pack.py zh source/zh.txt
+          python3 tools/build-ime-table.py zh source/zh-ime.tsv
+          python3 tools/validate-pack.py zh
+          ls -lh Lexicons/zh.cime Lexicons/zh.clex Lexicons/zh.cngm
 
       - name: Stable profile regression tests
         if: steps.upstream.outputs.should_build == 'true'
@@ -154,7 +155,7 @@ jobs:
           from pathlib import Path
 
           rows = {}
-          for raw in Path('Lexicons/zh_cn.cime').read_text(encoding='utf-8').splitlines():
+          for raw in Path('Lexicons/zh.cime').read_text(encoding='utf-8').splitlines():
               fields = raw.split('\t')
               if len(fields) >= 2:
                   rows[fields[0]] = fields[1:]
@@ -163,24 +164,15 @@ jobs:
               'nihao':'你好',
               'dihao':'帝豪',
               'jilidihao':'吉利帝豪',
-              'kjzl':'快捷指令',
-              'k j z l':'快捷指令',
-              'smj':'什么价',
-              's m j':'什么价',
-              'smjia':'什么价',
-              's m jia':'什么价',
+              'kuaijiezhiling':'快捷指令',
               'shenmejia':'什么价',
-              'shen me jia':'什么价',
               'qujianma':'取件码',
-              'qu jian ma':'取件码',
               'xunihao':'虚拟号',
-              'xu ni hao':'虚拟号',
               'github':'GitHub',
               'chatgpt':'ChatGPT',
               'appstore':'App Store',
               'appsrore':'App Store',
-              'wanxiangbaoyishengxiao':'万象包已生效',
-              'wan xiang bao yi sheng xiao':'万象包已生效',
+              'weng':'万象包已生效',
           }
           failed = []
           for key, want in exact.items():
@@ -189,25 +181,22 @@ jobs:
               if not got or got[0] != want:
                   failed.append((key, want, got[:8]))
 
-          contains = {
-              'bzd':'不知道',
-              'wsm':'为什么',
-              'zmhs':'怎么回事',
-          }
-          for key, want in contains.items():
-              got = rows.get(key, [])
-              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
-              if want not in got[:8]:
-                  failed.append((key, want, got[:8]))
+          # Stable CIME intentionally does not contain explicit jianpin or
+          # spaced-Pinyin rows. Clink derives initials/segmentation at runtime.
+          for forbidden in ('bzd','smj','kjzl','s m j','k j z l','shen me jia'):
+              if forbidden in rows:
+                  failed.append(('unexpected non-canonical CIME reading', forbidden))
 
-          if len(rows) < 550000:
+          if len(rows) < 120000:
               failed.append(('IME table unexpectedly small', len(rows)))
+          if len(rows) > 160000:
+              failed.append(('IME table unexpectedly large', len(rows)))
 
-          # Clink can re-rank partial-initial composition using CLEX frequency
-          # instead of the literal smj CIME row. Ensure the canonical phrase
-          # "什么价" remains much stronger than "什么叫" for that path.
+          # The pack cannot author a literal smj row for Clink's runtime
+          # jianpin path. Keep the canonical phrase extremely strong so the
+          # runtime has the best available language-data evidence for 什么价.
           freqs = {}
-          for raw in Path('source/zh_cn.txt').read_text(encoding='utf-8').splitlines():
+          for raw in Path('source/zh.txt').read_text(encoding='utf-8').splitlines():
               if not raw or raw.startswith('#'):
                   continue
               fields = raw.split('\t')
@@ -237,7 +226,7 @@ jobs:
           from pathlib import Path
 
           release = json.loads(Path('_wanxiang_release/release.json').read_text(encoding='utf-8'))
-          build = json.loads(Path('source/zh_cn-wanxiang-build.json').read_text(encoding='utf-8'))
+          build = json.loads(Path('source/zh-wanxiang-build.json').read_text(encoding='utf-8'))
           asset = next(a for a in release['assets'] if a['name'] == 'base-dicts.zip')
           receipt = {
               'profile': 'v4-stable',
@@ -263,9 +252,9 @@ jobs:
         run: |
           set -euo pipefail
           find Lexicons -mindepth 1 -maxdepth 1 \
-            ! -name 'zh_cn.clex' \
-            ! -name 'zh_cn.cime' \
-            ! -name 'zh_cn.cngm' \
+            ! -name 'zh.clex' \
+            ! -name 'zh.cime' \
+            ! -name 'zh.cngm' \
             -exec rm -rf {} +
 
           rm -rf out
@@ -276,10 +265,10 @@ jobs:
           import json
           from pathlib import Path
           m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
-          assert [p['code'] for p in m['packs']] == ['zh_cn'], m
+          assert [p['code'] for p in m['packs']] == ['zh'], m
           assets = {a['path'] for a in m['packs'][0]['assets']}
-          assert assets == {'zh_cn.cime','zh_cn.clex','zh_cn.cngm'}, assets
-          print('Manifest verified for zh_cn:', sorted(assets))
+          assert assets == {'zh.cime','zh.clex','zh.cngm'}, assets
+          print('Manifest verified for zh:', sorted(assets))
           PY
 
       - name: Publish v4 stable as latest
@@ -291,13 +280,13 @@ jobs:
           gh release create "$VERSION" \
             --target "$GITHUB_SHA" \
             --draft \
-            --title "Clink 中文万象 v4 stable (zh_cn) — $VERSION" \
-            --notes "iOS 稳定版（独立社区语言代码 zh_cn，避免与 Clink 官方 zh 冲突）：优先中文核心覆盖，降低 CNGM/候选压力；保留简拼、英文、中英混输、纠错、领域词和快捷词。"
+            --title "Clink 中文万象 v4 stable — $VERSION" \
+            --notes "iOS 稳定版：优先中文核心覆盖，降低 CNGM/候选压力；保留简拼、英文、中英混输、纠错、领域词和快捷词。"
 
           gh release upload "$VERSION" \
-            out/assets/zh_cn--zh_cn.cime \
-            out/assets/zh_cn--zh_cn.clex \
-            out/assets/zh_cn--zh_cn.cngm \
+            out/assets/zh--zh.cime \
+            out/assets/zh--zh.clex \
+            out/assets/zh--zh.cngm \
             out/manifest.json \
             wanxiang-source.json
 
