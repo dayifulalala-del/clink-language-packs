@@ -124,19 +124,19 @@ jobs:
             --dict-root _wanxiang_dicts \
             --code zh \
             --out-dir source \
-            --lexicon-limit 600000 \
-            --max-ime-readings 160000 \
-            --max-candidates 12 \
+            --lexicon-limit 650000 \
+            --max-ime-readings 650000 \
+            --max-candidates 16 \
             --max-word-length 16 \
             --max-following 32 \
-            --compact-ime-only \
+            --single-char-ime-min-weight 1 \
             --latin-terms source/zh-latin-terms.tsv \
             --custom-terms source/zh-domain-terms.tsv \
             --shortcut-terms source/zh-shortcuts.tsv \
-            --english-limit 15000 \
-            --english-typo-limit 1000 \
-            --jianpin-limit 0 \
-            --core-compact-reading-budget 130000 \
+            --english-limit 20000 \
+            --english-typo-limit 2500 \
+            --jianpin-limit 50000 \
+            --core-compact-reading-budget 450000 \
             --receipt-json source/zh-wanxiang-build.json
 
       - name: Build Clink files
@@ -160,58 +160,46 @@ jobs:
               if len(fields) >= 2:
                   rows[fields[0]] = fields[1:]
 
-          exact = {
-              'nihao':'你好',
+          expected = {
+              'pinyin':'拼音', 'pin yin':'拼音',
+              'nihao':'你好', 'ni hao':'你好',
+              'weishenme':'为什么', 'wei shen me':'为什么',
+              'buzhidao':'不知道', 'bu zhi dao':'不知道',
+              'github':'GitHub', 'githbu':'GitHub',
+              'chatgpt':'ChatGPT', 'chatgtp':'ChatGPT',
+              'codex':'Codex', 'codxe':'Codex',
+              'openai':'OpenAI',
+              'docker':'Docker', 'doker':'Docker',
+              'python':'Python', 'pyhton':'Python',
+              'appstore':'App Store', 'appsrore':'App Store',
               'dihao':'帝豪',
               'jilidihao':'吉利帝豪',
-              'kuaijiezhiling':'快捷指令',
-              'shenmejia':'什么价',
-              'qujianma':'取件码',
-              'xunihao':'虚拟号',
-              'github':'GitHub',
-              'chatgpt':'ChatGPT',
-              'appstore':'App Store',
-              'appsrore':'App Store',
-              'weng':'万象包已生效',
+              'kjzl':'快捷指令', 'k j z l':'快捷指令',
+              'smjia':'什么价', 's m jia':'什么价',
+              'smj':'什么价', 's m j':'什么价',
+              'qujianma':'取件码', 'qu jian ma':'取件码',
+              'xunihao':'虚拟号', 'xu ni hao':'虚拟号',
           }
           failed = []
-          for key, want in exact.items():
+          for key, want in expected.items():
               got = rows.get(key, [])
               print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
               if not got or got[0] != want:
                   failed.append((key, want, got[:8]))
 
-          # Stable CIME intentionally does not contain explicit jianpin or
-          # spaced-Pinyin rows. Clink derives initials/segmentation at runtime.
-          for forbidden in ('bzd','smj','kjzl','s m j','k j z l','shen me jia'):
-              if forbidden in rows:
-                  failed.append(('unexpected non-canonical CIME reading', forbidden))
+          contains = {
+              'bzd':'不知道',
+              'wsm':'为什么',
+              'zmhs':'怎么回事',
+          }
+          for key, want in contains.items():
+              got = rows.get(key, [])
+              print(key, '=>', ' / '.join(got[:8]) or 'MISSING')
+              if want not in got[:8]:
+                  failed.append((key, want, got[:8]))
 
-          if len(rows) < 120000:
+          if len(rows) < 600000:
               failed.append(('IME table unexpectedly small', len(rows)))
-          if len(rows) > 160000:
-              failed.append(('IME table unexpectedly large', len(rows)))
-
-          # The pack cannot author a literal smj row for Clink's runtime
-          # jianpin path. Keep the canonical phrase extremely strong so the
-          # runtime has the best available language-data evidence for 什么价.
-          freqs = {}
-          for raw in Path('source/zh.txt').read_text(encoding='utf-8').splitlines():
-              if not raw or raw.startswith('#'):
-                  continue
-              fields = raw.split('\t')
-              if len(fields) >= 2:
-                  try:
-                      freqs[fields[0]] = float(fields[1])
-                  except ValueError:
-                      pass
-          print('CLEX source 什么价:', freqs.get('什么价'))
-          print('CLEX source 什么叫:', freqs.get('什么叫'))
-          if freqs.get('什么价', 0) < 1000000:
-              failed.append(('什么价 frequency too low', freqs.get('什么价')))
-          if freqs.get('什么价', 0) <= freqs.get('什么叫', 0):
-              failed.append(('什么价 must outrank 什么叫 for partial-Pinyin ranking',
-                             freqs.get('什么价'), freqs.get('什么叫')))
 
           if failed:
               raise SystemExit('v4 stable regression failure: ' + repr(failed))
