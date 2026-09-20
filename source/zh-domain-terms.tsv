@@ -155,15 +155,3 @@ B站	b zhan	6500
 抖音	dou yin	7000
 微博	wei bo	7000
 微信	wei xin	8000
-
-# Automotive / common vehicle terms
-帝豪	di hao	12000
-吉利帝豪	ji li di hao	11000
-
-# High-priority everyday phrases used by Clink's partial-Pinyin runtime ranking
-# Keep canonical full Pinyin here as well as shortcut aliases: the keyboard may
-# expand initials (smj) into shen/me/j... before consulting the CIME table.
-什么价	shen me jia	1000000
-
-# Temporary on-device smoke-test phrase; remove after confirming the community pack is active.
-万象包已生效	wan xiang bao yi sheng xiao	1000000
