@@ -1,0 +1,164 @@
+name: Publish compact Clink Chinese Wanxiang (v5)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_readings:
+        description: "Chinese readings kept (lower it if Clink still crashes)"
+        required: true
+        default: "80000"
+      max_latin:
+        description: "English / brand readings kept"
+        required: true
+        default: "30000"
+  push:
+    branches: [main]
+    paths:
+      - "tools/compact_zh_pack.py"
+      - ".github/workflows/build-zh-wanxiang-v5-compact.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clink-zh-wanxiang-v5-compact
+  cancel-in-progress: true
+
+jobs:
+  publish-compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      KNOWN_GOOD_TAG: vzh-wanxiang-v3-31-1
+      KNOWN_GOOD_CIME_SHA256: 458939043be0338059deae8c1e7448df414978c2fa7d805e5f3d0bbaec3c7827
+      KNOWN_GOOD_CLEX_SHA256: 9259b3e09704dfdae0a4e6be617c8373c0af487de4da7ae682cf2cd7920e4e5b
+      MAX_READINGS: ${{ inputs.max_readings || '80000' }}
+      MAX_LATIN: ${{ inputs.max_latin || '30000' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set lexically sortable release version
+        run: |
+          # v5 sorts after every v3/v4 tag, so an installed pack always sees an update.
+          printf -v run "%06d" "$GITHUB_RUN_NUMBER"
+          echo "VERSION=vzh-wanxiang-v5-z${run}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Download known-good v3-31-1 assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _known_good
+          mkdir -p _known_good
+          gh release download "$KNOWN_GOOD_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'zh--zh.cime' \
+            --pattern 'zh--zh.clex' \
+            --pattern 'wanxiang-source.json' \
+            --dir _known_good
+          echo "$KNOWN_GOOD_CIME_SHA256  _known_good/zh--zh.cime" | sha256sum -c -
+          echo "$KNOWN_GOOD_CLEX_SHA256  _known_good/zh--zh.clex" | sha256sum -c -
+
+      - name: Build compact pack
+        run: |
+          set -euo pipefail
+          # Only zh may be released from this repository.
+          find Lexicons -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          python3 tools/compact_zh_pack.py \
+            --cime _known_good/zh--zh.cime \
+            --clex _known_good/zh--zh.clex \
+            --max-readings "$MAX_READINGS" \
+            --max-latin "$MAX_LATIN" \
+            --receipt compact-receipt.json
+          python3 tools/validate-pack.py zh
+          ls -l Lexicons
+
+      - name: Enforce keyboard memory budget
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sizes = {p.name: p.stat().st_size for p in sorted(Path('Lexicons').iterdir())}
+          total = sum(sizes.values())
+          print(sizes, 'total', total)
+          # v3-31-1 was 44.9 MB (20.4 MB CIME) and crashed the keyboard. The
+          # largest official pack (mt) is ~13.5 MB; stay in that family.
+          if set(sizes) != {'zh.cime', 'zh.clex', 'zh.cngm'}:
+              raise SystemExit(f'unexpected assets: {sorted(sizes)}')
+          if sizes['zh.cime'] > 6_000_000 or total > 15_000_000:
+              raise SystemExit('Pack too large for the Clink keyboard; lower max_readings / max_latin.')
+          PY
+
+      - name: Create source receipt
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          receipt = {
+              'profile': 'v5-compact',
+              'derivedFromTag': 'vzh-wanxiang-v3-31-1',
+              'note': 'Rows and candidate order are taken from v3-31-1 and only truncated; CNGM is rebuilt on the final CLEX IDs.',
+              'compaction': json.loads(Path('compact-receipt.json').read_text(encoding='utf-8')),
+              'knownGoodSourceReceipt': json.loads(Path('_known_good/wanxiang-source.json').read_text(encoding='utf-8')),
+          }
+          Path('wanxiang-source.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
+
+      - name: Build manifest containing only zh
+        run: |
+          set -euo pipefail
+          rm -rf out
+          mkdir -p out
+          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
+          assert [p['code'] for p in m['packs']] == ['zh'], m
+          assets = {a['path'] for a in m['packs'][0]['assets']}
+          assert assets == {'zh.cime', 'zh.clex', 'zh.cngm'}, assets
+          print('Compact manifest verified:', m['version'], sorted(assets))
+          PY
+
+      - name: Publish as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --title "Clink 中文万象 v5 compact — $VERSION" \
+            --notes "修复选择本仓库后 Clink 崩溃：v3-31-1 的 zh 包共 44.9 MB（仅 zh.cime 就有 65 万条 reading），超出 iOS 键盘扩展的内存上限。v5 从 v3-31-1 裁剪而来，保留原候选顺序、全部单音节、简拼、中英混输、自维护快捷词和领域词，体积降到约 10 MB。同时重建了 zh.cngm：旧版与 zh.clex 的词 ID 错位（部分越界），下一词联想此前实际上是错的。"
+          gh release upload "$VERSION" \
+            out/assets/zh--zh.cime \
+            out/assets/zh--zh.clex \
+            out/assets/zh--zh.cngm \
+            out/manifest.json \
+            wanxiang-source.json
+          gh release edit "$VERSION" --draft=false --latest
+
+      - name: Verify published bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/release-check"
+          mkdir -p "$RUNNER_TEMP/release-check"
+          gh release download "$VERSION" --dir "$RUNNER_TEMP/release-check"
+          cmp out/manifest.json "$RUNNER_TEMP/release-check/manifest.json"
+          cmp Lexicons/zh.cime "$RUNNER_TEMP/release-check/zh--zh.cime"
+          cmp Lexicons/zh.clex "$RUNNER_TEMP/release-check/zh--zh.clex"
+          cmp Lexicons/zh.cngm "$RUNNER_TEMP/release-check/zh--zh.cngm"
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          test "$latest" = "$VERSION"
+          echo "Verified compact latest release: $latest"
