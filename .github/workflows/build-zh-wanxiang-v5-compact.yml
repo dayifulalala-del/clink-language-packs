@@ -15,6 +15,7 @@ on:
     branches: [main]
     paths:
       - "tools/compact_zh_pack.py"
+      - "source/zh-cuoyin-extra.tsv"
       - ".github/workflows/build-zh-wanxiang-v5-compact.yml"
 
 permissions:
@@ -67,6 +68,23 @@ jobs:
           echo "$KNOWN_GOOD_CIME_SHA256  _known_good/zh--zh.cime" | sha256sum -c -
           echo "$KNOWN_GOOD_CLEX_SHA256  _known_good/zh--zh.clex" | sha256sum -c -
 
+      - name: Download Wanxiang Chinese correction table
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _wanxiang
+          mkdir -p _wanxiang
+          gh release download dict-nightly \
+            --repo amzxyz/rime-wanxiang \
+            --pattern base-dicts.zip \
+            --dir _wanxiang
+          # cuoyin is Wanxiang's only correction table (wrong readings / characters);
+          # duoyin is ordinary vocabulary there. v3-31-1 used cuoyin 05b423d9...;
+          # only readings already present in v3-31-1 are protected.
+          unzip -q -j _wanxiang/base-dicts.zip '*cuoyin.dict.yaml' -d _wanxiang
+          sha256sum _wanxiang/cuoyin.dict.yaml
+
       - name: Build compact pack
         run: |
           set -euo pipefail
@@ -77,6 +95,7 @@ jobs:
             --clex _known_good/zh--zh.clex \
             --max-readings "$MAX_READINGS" \
             --max-latin "$MAX_LATIN" \
+            --corrections _wanxiang/cuoyin.dict.yaml \
             --receipt compact-receipt.json
           python3 tools/validate-pack.py zh
           ls -l Lexicons
@@ -100,6 +119,7 @@ jobs:
       - name: Create source receipt
         run: |
           python3 - <<'PY'
+          import hashlib
           import json
           from pathlib import Path
 
@@ -108,6 +128,8 @@ jobs:
               'derivedFromTag': 'vzh-wanxiang-v3-31-1',
               'note': 'Rows and candidate order are taken from v3-31-1 and only truncated; CNGM is rebuilt on the final CLEX IDs.',
               'compaction': json.loads(Path('compact-receipt.json').read_text(encoding='utf-8')),
+              'correctionTables': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                   for p in sorted(Path('_wanxiang').glob('*.dict.yaml'))},
               'knownGoodSourceReceipt': json.loads(Path('_known_good/wanxiang-source.json').read_text(encoding='utf-8')),
           }
           Path('wanxiang-source.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -138,7 +160,7 @@ jobs:
             --target "$GITHUB_SHA" \
             --draft \
             --title "Clink 中文万象 v5 compact — $VERSION" \
-            --notes "修复选择本仓库后 Clink 崩溃：v3-31-1 的 zh 包共 44.9 MB（仅 zh.cime 就有 65 万条 reading），超出 iOS 键盘扩展的内存上限。v5 从 v3-31-1 裁剪而来，保留原候选顺序、全部单音节、简拼、中英混输、自维护快捷词和领域词，体积降到约 10 MB。同时重建了 zh.cngm：旧版与 zh.clex 的词 ID 错位（部分越界），下一词联想此前实际上是错的。"
+            --notes "从 v3-31-1 裁剪的约 11 MB 中文包（原 44.9 MB 会让 Clink 崩溃）。保留原候选顺序、全部单音节、简拼、中英混输、自维护快捷词和领域词，万象全部错音错字纠错（cuoyin）、自维护常见误读，以及参考搜狗 / libpinyin 的拼音按键纠错（如 zhognguo、nihoa、tain）；不含英文拼写纠错。zh.cngm 按最终 zh.clex 的词 ID 重新生成。"
           gh release upload "$VERSION" \
             out/assets/zh--zh.cime \
             out/assets/zh--zh.clex \
