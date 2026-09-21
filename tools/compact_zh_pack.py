@@ -22,14 +22,22 @@ What it removes:
     a Pinyin composition cannot contain, plus readings longer than --max-key.
   * long-tail readings whose best candidate has the lowest CLEX frequency.
     Chinese and Latin rows have separate budgets because Wanxiang weights
-    English far below Chinese; every exact English word is ranked before
-    generated typo aliases.
+    English far below Chinese.
+  * English typo aliases ("githbu" -> GitHub), unless --keep-latin-typos.
   * candidates past --max-candidates on multi-syllable rows (single syllables
     keep all 16).
   * CLEX words no kept reading can produce.
 
 Always kept: every single-syllable row, every project shortcut / domain /
-Latin term from source/, and the regression readings below.
+Latin term from source/, every Chinese correction from the Rime dictionaries
+passed with --corrections (Wanxiang's cuoyin.dict.yaml: wrong readings and
+characters such as "maopeifang" -> 毛坯房), the project misreadings in
+source/zh-cuoyin-extra.tsv, and the regression readings below.
+
+What it adds: Pinyin slip rows for single syllables and the most frequent
+words, e.g. "zhognguo" -> 中国, "nihoa" -> 你好. Only the systematic slips that
+Sogou and libpinyin correct are generated, and a slip is dropped when it is
+itself valid Pinyin or an existing reading, so normal input is never shadowed.
 
 Usage:
   python3 tools/compact_zh_pack.py --cime known/zh.cime --clex known/zh.clex
@@ -42,17 +50,35 @@ import math
 import re
 import struct
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 REGRESSION_EXACT = {
     'pinyin': '拼音', 'nihao': '你好', 'dihao': '帝豪', 'jilidihao': '吉利帝豪',
     'kjzl': '快捷指令', 'smj': '什么价', 'smjia': '什么价', 'qujianma': '取件码',
-    'xunihao': '虚拟号', 'github': 'GitHub', 'appsrore': 'App Store',
-    'computer': 'computer', 'compuer': 'computer', 'maopeifang': '毛坯房',
+    'xunihao': '虚拟号', 'github': 'GitHub', 'appstore': 'App Store',
+    'computer': 'computer', 'maopeifang': '毛坯房',
     'heilongjiang': '黑龙江', 'ruanluyou': '软路由', 'weishenme': '为什么',
     'buzhidao': '不知道', 'chatgpt': 'ChatGPT', 'python': 'Python',
 }
 REGRESSION_CONTAINS = {'bzd': '不知道', 'wsm': '为什么', 'zmhs': '怎么回事', 'yyds': 'YYDS'}
+TONELESS = str.maketrans({ch: base for base, marks in {
+    'a': 'āáǎà', 'e': 'ēéěè', 'i': 'īíǐì', 'o': 'ōóǒò', 'u': 'ūúǔù', 'v': 'ǖǘǚǜü'}.items() for ch in marks})
+# Systematic Pinyin slips corrected by Sogou (ign/img/uei/uen/iou) and
+# libpinyin (gn, on, ue/v), plus the ao and ia/ua transpositions.
+PINYIN_TYPOS = [
+    (re.compile(r'ng$'), 'gn'),                   # dign -> ding, zhogn -> zhong
+    (re.compile(r'ing$'), 'img'),                 # dimg -> ding
+    (re.compile(r'ong$'), 'on'),                  # zhonguo -> zhongguo
+    (re.compile(r'ui$'), 'uei'),                  # guei -> gui
+    (re.compile(r'^([^jqxy]+)un$'), r'\1uen'),    # luen -> lun
+    (re.compile(r'iu$'), 'iou'),                  # liou -> liu
+    (re.compile(r'ao$'), 'oa'),                   # nihoa -> nihao
+    (re.compile(r'([iu])a(o|n|ng)$'), r'a\1\2'),  # tain -> tian, xaio -> xiao
+    (re.compile(r'^([jqxy])u'), r'\1v'),          # jv -> ju
+]
+UMLAUT = re.compile(r'^([nl])ve$')                # lue -> lve (略), although lu+e also parses
+REGRESSION_TYPOS = {'zhognguo': '中国', 'nihoa': '你好', 'jintain': '今天', 'shagnhai': '上海', 'lue': '略'}
 HAN = re.compile(r'^[\u3400-\u9fff\U00020000-\U0003134f]$')
 
 
@@ -146,6 +172,77 @@ def read_cime(path: Path):
     return rows
 
 
+def read_rime_dict(path: Path):
+    """(word, compact reading) pairs from a Rime *.dict.yaml body."""
+    body = False
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if line == '...':
+            body = True
+            continue
+        fields = line.split('\t')
+        if body and len(fields) >= 2 and not line.startswith('#'):
+            reading = fields[1].lower().replace('u:', 'v').translate(TONELESS)
+            yield fields[0], re.sub(r'[^a-z]', '', reading)
+
+
+def read_extra_corrections(path: Path):
+    """(word, misread reading) pairs maintained in source/zh-cuoyin-extra.tsv."""
+    if not path.exists():
+        return []
+    pairs = []
+    for raw in path.read_text(encoding='utf-8').splitlines():
+        fields = raw.split('\t')
+        if raw.strip() and not raw.startswith('#') and len(fields) >= 2:
+            pairs.append((fields[0].strip(), fields[1].strip().lower()))
+    return pairs
+
+
+def pinyin_typos(kept, syllables, sources, max_key, max_candidates=5):
+    """Rows keyed by common slips of each source reading, merged in source order."""
+    safe = syllables - {'n', 'ng'}  # 嗯 never sits inside a typed word
+
+    @lru_cache(maxsize=None)
+    def splits(text):
+        if not text:
+            return ((),)
+        return tuple((text[:j],) + rest for j in range(1, min(6, len(text)) + 1)
+                     if text[:j] in syllables for rest in splits(text[j:]))
+
+    @lru_cache(maxsize=None)
+    def parses(text):
+        return not text or any(text[:j] in safe and parses(text[j:]) for j in range(1, min(6, len(text)) + 1))
+
+    merged = collections.defaultdict(list)
+    for rank, reading in enumerate(sources):
+        parts = next((p for p in splits(reading) if len(p) == len(kept[reading][0])), None)
+        for i, part in enumerate(parts or ()):
+            slips = [(pattern.sub(replacement, part), True) for pattern, replacement in PINYIN_TYPOS
+                     if pattern.search(part)]
+            if UMLAUT.search(part):
+                slips.append((UMLAUT.sub(r'\1ue', part), False))
+            for slip, strict in slips:
+                key = ''.join(parts[:i] + (slip,) + parts[i + 1:])
+                if len(key) <= max_key and key not in kept and not (strict and parses(key)):
+                    merged[key].append(rank)
+    rows = {}
+    for key, ranks in merged.items():
+        candidates = []
+        for rank in sorted(set(ranks)):
+            candidates += [c for c in kept[sources[rank]] if c not in candidates]
+        rows[key] = candidates[:max_candidates]
+    return rows
+
+
+def edit_distance(a: str, b: str) -> int:
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
+        previous = current
+    return previous[-1]
+
+
 def protected_terms(source: Path):
     """Terms and readings the project maintains by hand."""
     terms, readings = set(), set()
@@ -182,8 +279,13 @@ def main():
     ap.add_argument('--source', type=Path, default=Path('source'))
     ap.add_argument('--out-dir', type=Path, default=Path('Lexicons'))
     ap.add_argument('--max-readings', type=int, default=80000, help='Chinese readings kept')
-    ap.add_argument('--max-latin', type=int, default=30000,
-                    help='English / brand readings kept (exact words before typo aliases)')
+    ap.add_argument('--max-latin', type=int, default=30000, help='English / brand readings kept')
+    ap.add_argument('--corrections', type=Path, nargs='*', default=[],
+                    help='Rime dictionaries whose readings are Chinese corrections to keep in full')
+    ap.add_argument('--keep-latin-typos', action='store_true',
+                    help='keep English typo aliases such as "githbu" -> GitHub')
+    ap.add_argument('--pinyin-typo-words', type=int, default=20000,
+                    help='most frequent words that also get Pinyin slip rows (0 disables slips)')
     ap.add_argument('--max-key', type=int, default=24, help='longest reading kept')
     ap.add_argument('--max-candidates', type=int, default=10,
                     help='candidates kept on multi-syllable rows')
@@ -206,8 +308,38 @@ def main():
     syllables = {r for r, v in rows.items()
                  if r.isascii() and r.isalpha() and len(r) <= 6 and HAN.match(v[0])}
 
+    def latin(r):
+        return rows[r][0].isascii()
+
+    def latin_typo(r):
+        # "githbu" -> GitHub, but not "ljiu" -> L9 or "dotnet" -> .NET.
+        spellings = [re.sub(r'[^a-z0-9]', '', c.lower()) for c in rows[r]]
+        return latin(r) and r not in spellings and min(edit_distance(r, w) for w in spellings) <= 2
+
+    typeable_count = len(rows)
+    dropped = set() if args.keep_latin_typos else {r for r in rows if latin_typo(r)}
+    rows = {r: v for r, v in rows.items() if r not in dropped}
+
+    # Project misreadings: the right word goes fifth on the misread row, so it
+    # stays on the first page without displacing the row's own top four.
+    corrections = {}
+    extra = read_extra_corrections(args.source / 'zh-cuoyin-extra.tsv')
+    for word, reading in extra:
+        if typeable.match(reading):
+            row = rows.setdefault(reading, [])
+            if word not in row:
+                row.insert(min(len(row), 4), word)
+                del row[16:]
+            corrections[reading] = max(corrections.get(reading, 0), row.index(word) + 1)
+
+    # Chinese corrections: the correcting word must survive candidate truncation.
+    for path in args.corrections:
+        for word, reading in read_rime_dict(path):
+            if word in rows.get(reading, []):
+                corrections[reading] = max(corrections.get(reading, 0), rows[reading].index(word) + 1)
+
     terms, manual_readings = protected_terms(args.source)
-    protected = set(syllables)
+    protected = set(syllables) | set(corrections)
     protected.update(r for r in manual_readings if r in rows)
     protected.update(r for r in REGRESSION_EXACT if r in rows)
     protected.update(r for r in REGRESSION_CONTAINS if r in rows)
@@ -215,27 +347,31 @@ def main():
         if any(c in terms for c in v[:3]):
             protected.add(r)
 
-    def latin(r):
-        return rows[r][0].isascii()
-
-    def exact_word(r):
-        return any(re.sub(r'[^a-z0-9]', '', c.lower()) == r for c in rows[r])
-
     chinese = sorted((r for r in rows if r not in protected and not latin(r)),
                      key=lambda r: (-score(rows[r]), len(r), r))
     english = sorted((r for r in rows if r not in protected and latin(r)),
-                     key=lambda r: (not exact_word(r), -score(rows[r]), len(r), r))
+                     key=lambda r: (-score(rows[r]), len(r), r))
     chinese_budget = max(0, args.max_readings - sum(1 for r in protected if not latin(r)))
     latin_budget = max(0, args.max_latin - sum(1 for r in protected if latin(r)))
     selected = protected | set(chinese[:chinese_budget]) | set(english[:latin_budget])
-    kept = {r: rows[r] if r in syllables else rows[r][:args.max_candidates] for r in selected}
+    kept = {r: rows[r] if r in syllables else rows[r][:max(args.max_candidates, corrections.get(r, 0))]
+            for r in selected}
+
+    typos = {}
+    if args.pinyin_typo_words > 0:
+        words_first = sorted((r for r in kept if r not in syllables and is_cjk(kept[r][0])),
+                             key=lambda r: (-score(kept[r]), len(r), r))
+        umlaut = [r for r in words_first[args.pinyin_typo_words:] if 'lve' in r or 'nve' in r]
+        sources = sorted(syllables & set(kept), key=lambda r: (-score(kept[r]), r))
+        typos = pinyin_typos(kept, syllables, sources + words_first[:args.pinyin_typo_words] + umlaut,
+                             args.max_key)
 
     # Kept rows are the known-good rows truncated, never reordered.
     args.out_dir.mkdir(parents=True, exist_ok=True)
     cime_path = args.out_dir / f'{args.code}.cime'
     with cime_path.open('w', encoding='utf-8', newline='\n') as out:
-        for r in sorted(kept):
-            out.write('\t'.join([r, *kept[r]]) + '\n')
+        for r in sorted({**kept, **typos}):
+            out.write('\t'.join([r, *kept.get(r, typos.get(r))]) + '\n')
 
     keep_word_ids = sorted({word_id[norm(c)] for v in kept.values() for c in v if norm(c) in word_id})
     write_clex(args.out_dir / f'{args.code}.clex', clex, keep_word_ids)
@@ -261,6 +397,16 @@ def main():
     for r in protected:
         if out_rows.get(r) != kept[r] or kept[r] != rows[r][:len(kept[r])]:
             failed.append(('protected row changed', r))
+    for r, depth in corrections.items():
+        if out_rows.get(r, [])[:depth] != rows[r][:depth]:
+            failed.append(('correction lost', r))
+    for word, reading in extra:
+        if typeable.match(reading) and word not in out_rows.get(reading, []):
+            failed.append(('extra correction lost', reading, word))
+    if args.pinyin_typo_words > 0:
+        for key, want in REGRESSION_TYPOS.items():
+            if out_rows.get(key, [None])[0] != want:
+                failed.append(('pinyin slip', key, want, out_rows.get(key, [])[:3]))
     if any(not typeable.match(r) for r in out_rows):
         failed.append('non a-z reading written')
     if failed:
@@ -273,12 +419,18 @@ def main():
         'maxKey': args.max_key,
         'maxCandidates': args.max_candidates,
         'maxFollowing': args.max_following,
+        'keepLatinTypos': args.keep_latin_typos,
+        'pinyinTypoWords': args.pinyin_typo_words,
         'input': {'readings': len(source_rows), 'clexWords': len(words)},
         'output': {
             'readings': len(out_rows),
             'candidates': sum(len(v) for v in out_rows.values()),
             'protectedReadings': len(protected),
-            'droppedNonTypeableReadings': len(source_rows) - len(rows),
+            'chineseCorrectionReadings': len(corrections),
+            'extraCorrections': len(extra),
+            'pinyinTypoReadings': len(typos),
+            'droppedLatinTypoReadings': len(dropped),
+            'droppedNonTypeableReadings': len(source_rows) - typeable_count,
             'clexWords': len(keep_word_ids),
             'cngmPairs': cngm_pairs,
             'bytes': {p.name: p.stat().st_size for p in (cime_path, args.out_dir / f'{args.code}.clex', cngm_path) if p.exists()},
