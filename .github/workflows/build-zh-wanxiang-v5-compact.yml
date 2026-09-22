@@ -20,6 +20,7 @@ on:
     paths:
       - "tools/compact_zh_pack.py"
       - "source/zh-cuoyin-extra.tsv"
+      - ".github/zh-v5-release-notes.md"
       - ".github/workflows/build-zh-wanxiang-v5-compact.yml"
 
 permissions:
@@ -148,6 +149,16 @@ jobs:
           if resident > 30:
               raise SystemExit(f'{resident:.1f} MB resident is too close to the iOS keyboard '
                                f'limit; lower target_rank.')
+
+          # Fill the release notes from what actually shipped, so the published
+          # description can never drift from the bytes it describes.
+          import os
+          notes = Path('.github/zh-v5-release-notes.md').read_text(encoding='utf-8')
+          Path('release-notes.md').write_text(
+              notes.format(pack_mb=f'{total/1e6:.2f}', resident_mb=f'{resident:.1f}',
+                           rows=f'{len(rows):,}', words=f'{count:,}', pairs=f'{pairs:,}',
+                           target_rank=os.environ['TARGET_RANK']),
+              encoding='utf-8')
           PY
 
       - name: Create source receipt
@@ -194,7 +205,7 @@ jobs:
             --target "$GITHUB_SHA" \
             --draft \
             --title "Clink 中文万象 v5 compact — $VERSION" \
-            --notes "从 v3-31-1 裁剪的约 11 MB 中文包（原 44.9 MB 会让 Clink 崩溃）。保留原候选顺序、全部单音节、简拼、中英混输、自维护快捷词和领域词，万象全部错音错字纠错（cuoyin）、自维护常见误读，以及参考搜狗 / libpinyin 的拼音按键纠错（如 zhognguo、nihoa、tain）；不含英文拼写纠错。zh.cngm 按最终 zh.clex 的词 ID 重新生成。"
+            --notes-file release-notes.md
           gh release upload "$VERSION" \
             out/assets/zh--zh.cime \
             out/assets/zh--zh.clex \
