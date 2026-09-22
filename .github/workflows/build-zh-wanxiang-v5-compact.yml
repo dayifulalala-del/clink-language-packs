@@ -10,7 +10,11 @@ on:
       max_latin:
         description: "English / brand readings kept"
         required: true
-        default: "30000"
+        default: "12000"
+      target_rank:
+        description: "Protect the N most frequent Chinese words (lower it if Clink still freezes)"
+        required: true
+        default: "50000"
   push:
     branches: [main]
     paths:
@@ -35,7 +39,8 @@ jobs:
       KNOWN_GOOD_CIME_SHA256: 458939043be0338059deae8c1e7448df414978c2fa7d805e5f3d0bbaec3c7827
       KNOWN_GOOD_CLEX_SHA256: 9259b3e09704dfdae0a4e6be617c8373c0af487de4da7ae682cf2cd7920e4e5b
       MAX_READINGS: ${{ inputs.max_readings || '80000' }}
-      MAX_LATIN: ${{ inputs.max_latin || '30000' }}
+      MAX_LATIN: ${{ inputs.max_latin || '12000' }}
+      TARGET_RANK: ${{ inputs.target_rank || '50000' }}
 
     steps:
       - name: Check out repository
@@ -95,6 +100,7 @@ jobs:
             --clex _known_good/zh--zh.clex \
             --max-readings "$MAX_READINGS" \
             --max-latin "$MAX_LATIN" \
+            --target-rank "$TARGET_RANK" \
             --corrections _wanxiang/cuoyin.dict.yaml \
             --receipt compact-receipt.json
           python3 tools/validate-pack.py zh
@@ -112,8 +118,36 @@ jobs:
           # largest official pack (mt) is ~13.5 MB; stay in that family.
           if set(sizes) != {'zh.cime', 'zh.clex', 'zh.cngm'}:
               raise SystemExit(f'unexpected assets: {sorted(sizes)}')
-          if sizes['zh.cime'] > 6_000_000 or total > 15_000_000:
-              raise SystemExit('Pack too large for the Clink keyboard; lower max_readings / max_latin.')
+          if sizes['zh.cime'] > 4_000_000 or total > 9_000_000:
+              raise SystemExit('Pack too large for the Clink keyboard; lower target_rank / max_readings / max_latin.')
+
+          # File size is not what iOS kills the extension for: resident memory is.
+          # A Swift [String: [String]] costs ~64 B per row before any candidate,
+          # so rows, candidates and CLEX words are the terms that matter here.
+          # v5-z000002 measured ~38 MB this way and still froze intermittently.
+          import struct
+          rows = [l.split('\t') for l in Path('Lexicons/zh.cime').read_text(encoding='utf-8').splitlines()]
+          cime = sum(64 + 16 * (len(f) - 1)
+                     + sum(32 + len(x.encode()) for x in f if len(x.encode()) > 15)
+                     for f in rows) * 1.4
+          d = Path('Lexicons/zh.clex').read_bytes()
+          count, alpha = struct.unpack_from('<II', d, 8)
+          off = 16 + 4 * alpha + (alpha + 1) * alpha
+          offs = struct.unpack_from(f'<{count + 1}I', d, off)
+          wb = sum(16 + (32 + (offs[i + 1] - offs[i]) if offs[i + 1] - offs[i] > 15 else 0)
+                   for i in range(count))
+          clex = wb + 32 + (wb + count * 8) * 1.4
+          g = Path('Lexicons/zh.cngm').read_bytes()
+          pairs = struct.unpack_from('<I', g, 8)[0]
+          groups = len(set(struct.unpack_from(f'<{pairs}I', g, 12)))
+          cngm = (groups * 56 + pairs * 8) * 1.4
+          resident = (cime + clex + cngm) / 1e6
+          print(f'estimated resident: {resident:.1f} MB '
+                f'(cime {cime/1e6:.1f} + clex {clex/1e6:.1f} + cngm {cngm/1e6:.1f}), '
+                f'{len(rows):,} rows, {count:,} words, {pairs:,} pairs')
+          if resident > 30:
+              raise SystemExit(f'{resident:.1f} MB resident is too close to the iOS keyboard '
+                               f'limit; lower target_rank.')
           PY
 
       - name: Create source receipt
