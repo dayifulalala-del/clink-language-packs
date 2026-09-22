@@ -16,16 +16,31 @@ pointed past the end of the dictionary. The new model is built directly on the
 final CLEX word IDs with the same pair rules as build_zh_wanxiang_v2.py, using
 every phrase of the known-good CLEX as evidence.
 
+How the budget is spent: a row costs far more than a candidate. A Swift
+[String: [String]] pays ~64 bytes per row (key handle, array handle, buffer
+header) before a single candidate, so a long-tail row holding one candidate
+costs five times what that candidate costs. Measured on the v3-31-1 input,
+1-2 syllable readings return 28,777 candidates per MB of resident memory
+while 6+ syllable readings return only 9,273. The budget therefore buys rows
+that serve words people actually type: --target-rank keeps a Chinese row only
+when one of its candidates is among the N most frequent words of the
+known-good CLEX, and --candidate-tiers truncates deeper on longer readings,
+which the candidate bar cannot show anyway. Against the full v3-31-1 table the
+top 50,000 words keep the same hit rate as the untrimmed pack (99.8% / 99.4% /
+99.0% for ranks 1-5k / 5k-20k / 20k-50k).
+
 What it removes:
   * readings the official zh table never uses: anything outside a-z, i.e.
     syllable-spaced duplicates ("pin yin" next to "pinyin") and digit keys that
     a Pinyin composition cannot contain, plus readings longer than --max-key.
-  * long-tail readings whose best candidate has the lowest CLEX frequency.
+  * Chinese rows that cannot produce any word inside --target-rank, then
+    long-tail readings whose best candidate has the lowest CLEX frequency.
     Chinese and Latin rows have separate budgets because Wanxiang weights
     English far below Chinese.
   * English typo aliases ("githbu" -> GitHub), unless --keep-latin-typos.
-  * candidates past --max-candidates on multi-syllable rows (single syllables
-    keep all 16).
+  * candidates past the --candidate-tiers cap for the reading's length, except
+    where a word inside --target-rank sits deeper (then the row keeps up to
+    --max-candidates). Single syllables keep all 16.
   * CLEX words no kept reading can produce.
 
 Always kept: every single-syllable row, every project shortcut / domain /
@@ -279,7 +294,10 @@ def main():
     ap.add_argument('--source', type=Path, default=Path('source'))
     ap.add_argument('--out-dir', type=Path, default=Path('Lexicons'))
     ap.add_argument('--max-readings', type=int, default=80000, help='Chinese readings kept')
-    ap.add_argument('--max-latin', type=int, default=30000, help='English / brand readings kept')
+    ap.add_argument('--max-latin', type=int, default=12000, help='English / brand readings kept')
+    ap.add_argument('--target-rank', type=int, default=50000,
+                    help='keep a Chinese row only when it can produce one of the N most '
+                         'frequent known-good words; 0 keeps every row the budget allows')
     ap.add_argument('--corrections', type=Path, nargs='*', default=[],
                     help='Rime dictionaries whose readings are Chinese corrections to keep in full')
     ap.add_argument('--keep-latin-typos', action='store_true',
@@ -287,9 +305,12 @@ def main():
     ap.add_argument('--pinyin-typo-words', type=int, default=20000,
                     help='most frequent words that also get Pinyin slip rows (0 disables slips)')
     ap.add_argument('--max-key', type=int, default=24, help='longest reading kept')
+    ap.add_argument('--candidate-tiers', default='6:6,10:4,24:3',
+                    help='per-reading-length candidate caps as len:cap pairs; longer '
+                         'readings are more precise and need fewer candidates')
     ap.add_argument('--max-candidates', type=int, default=10,
                     help='candidates kept on multi-syllable rows')
-    ap.add_argument('--max-following', type=int, default=10,
+    ap.add_argument('--max-following', type=int, default=6,
                     help='next-word pairs kept per previous word (0 drops CNGM)')
     ap.add_argument('--receipt', type=Path)
     args = ap.parse_args()
@@ -307,6 +328,23 @@ def main():
 
     syllables = {r for r, v in rows.items()
                  if r.isascii() and r.isalpha() and len(r) <= 6 and HAN.match(v[0])}
+
+    # Frequency rank of every Chinese word in the known-good CLEX. Rows are kept
+    # for the words they can actually produce, not for their own best score.
+    zh_rank = {}
+    if args.target_rank > 0:
+        ranked = sorted((i for i, w in enumerate(words) if is_cjk(w)),
+                        key=lambda i: (-prob[i], words[i].encode()))
+        zh_rank = {words[i]: n for n, i in enumerate(ranked)}
+
+    def top_positions(cands):
+        """Indexes of candidates that are among the --target-rank most frequent words."""
+        return [i for i, c in enumerate(cands) if zh_rank.get(norm(c), 1 << 30) < args.target_rank]
+
+    tiers = sorted(tuple(int(n) for n in part.split(':')) for part in args.candidate_tiers.split(','))
+
+    def tier_cap(reading):
+        return next((cap for limit, cap in tiers if len(reading) <= limit), tiers[-1][1])
 
     def latin(r):
         return rows[r][0].isascii()
@@ -347,15 +385,24 @@ def main():
         if any(c in terms for c in v[:3]):
             protected.add(r)
 
-    chinese = sorted((r for r in rows if r not in protected and not latin(r)),
+    chinese = sorted((r for r in rows if r not in protected and not latin(r)
+                      and (not zh_rank or top_positions(rows[r]))),
                      key=lambda r: (-score(rows[r]), len(r), r))
     english = sorted((r for r in rows if r not in protected and latin(r)),
                      key=lambda r: (-score(rows[r]), len(r), r))
     chinese_budget = max(0, args.max_readings - sum(1 for r in protected if not latin(r)))
     latin_budget = max(0, args.max_latin - sum(1 for r in protected if latin(r)))
     selected = protected | set(chinese[:chinese_budget]) | set(english[:latin_budget])
-    kept = {r: rows[r] if r in syllables else rows[r][:max(args.max_candidates, corrections.get(r, 0))]
-            for r in selected}
+    def truncate(r):
+        if r in syllables:
+            return rows[r]                       # 401 single-syllable rows: single characters keep all 16
+        depth = tier_cap(r)
+        hit = top_positions(rows[r])
+        if hit:                                  # never cut off the frequent word this row was kept for
+            depth = max(depth, min(hit[-1] + 1, args.max_candidates))
+        return rows[r][:max(depth, corrections.get(r, 0))]
+
+    kept = {r: truncate(r) for r in selected}
 
     typos = {}
     if args.pinyin_typo_words > 0:
@@ -417,6 +464,8 @@ def main():
         'maxReadings': args.max_readings,
         'maxLatin': args.max_latin,
         'maxKey': args.max_key,
+        'targetRank': args.target_rank,
+        'candidateTiers': args.candidate_tiers,
         'maxCandidates': args.max_candidates,
         'maxFollowing': args.max_following,
         'keepLatinTypos': args.keep_latin_typos,
