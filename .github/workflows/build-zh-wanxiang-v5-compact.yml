@@ -6,15 +6,19 @@ on:
       max_readings:
         description: "Chinese readings kept (lower it if Clink still crashes)"
         required: true
-        default: "80000"
+        default: "150000"
       max_latin:
         description: "English / brand readings kept"
         required: true
         default: "12000"
       target_rank:
-        description: "Protect the N most frequent Chinese words (lower it if Clink still freezes)"
+        description: "Keep only rows that reach the N most frequent words; 0 = no such filter"
         required: true
-        default: "50000"
+        default: "0"
+      max_clex_words:
+        description: "CLEX word cap (independent of CIME; official zh ships ~30k)"
+        required: true
+        default: "40000"
   push:
     branches: [main]
     paths:
@@ -39,9 +43,10 @@ jobs:
       KNOWN_GOOD_TAG: vzh-wanxiang-v3-31-1
       KNOWN_GOOD_CIME_SHA256: 458939043be0338059deae8c1e7448df414978c2fa7d805e5f3d0bbaec3c7827
       KNOWN_GOOD_CLEX_SHA256: 9259b3e09704dfdae0a4e6be617c8373c0af487de4da7ae682cf2cd7920e4e5b
-      MAX_READINGS: ${{ inputs.max_readings || '80000' }}
+      MAX_READINGS: ${{ inputs.max_readings || '150000' }}
       MAX_LATIN: ${{ inputs.max_latin || '12000' }}
-      TARGET_RANK: ${{ inputs.target_rank || '50000' }}
+      TARGET_RANK: ${{ inputs.target_rank || '0' }}
+      MAX_CLEX_WORDS: ${{ inputs.max_clex_words || '40000' }}
 
     steps:
       - name: Check out repository
@@ -102,6 +107,7 @@ jobs:
             --max-readings "$MAX_READINGS" \
             --max-latin "$MAX_LATIN" \
             --target-rank "$TARGET_RANK" \
+            --max-clex-words "$MAX_CLEX_WORDS" \
             --corrections _wanxiang/cuoyin.dict.yaml \
             --receipt compact-receipt.json
           python3 tools/validate-pack.py zh
@@ -119,8 +125,8 @@ jobs:
           # largest official pack (mt) is ~13.5 MB; stay in that family.
           if set(sizes) != {'zh.cime', 'zh.clex', 'zh.cngm'}:
               raise SystemExit(f'unexpected assets: {sorted(sizes)}')
-          if sizes['zh.cime'] > 4_000_000 or total > 9_000_000:
-              raise SystemExit('Pack too large for the Clink keyboard; lower target_rank / max_readings / max_latin.')
+          if sizes['zh.cime'] > 7_000_000 or total > 10_000_000:
+              raise SystemExit('Pack too large for the Clink keyboard; lower max_readings / max_latin.')
 
           # File size is not what iOS kills the extension for: resident memory is.
           # A Swift [String: [String]] costs ~64 B per row before any candidate,
@@ -146,9 +152,12 @@ jobs:
           print(f'estimated resident: {resident:.1f} MB '
                 f'(cime {cime/1e6:.1f} + clex {clex/1e6:.1f} + cngm {cngm/1e6:.1f}), '
                 f'{len(rows):,} rows, {count:,} words, {pairs:,} pairs')
-          if resident > 30:
+          # v5-z000002 measured 38.4 MB and froze intermittently; z000003/4 measured
+          # 25.6 MB and did not. Stay clearly below the known-bad figure.
+          if resident > 34:
               raise SystemExit(f'{resident:.1f} MB resident is too close to the iOS keyboard '
-                               f'limit; lower target_rank.')
+                               f'limit; lower max_readings, or set target_rank to spend '
+                               f'a smaller budget on common words first.')
 
           # Fill the release notes from what actually shipped, so the published
           # description can never drift from the bytes it describes.

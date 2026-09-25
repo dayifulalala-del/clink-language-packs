@@ -22,12 +22,24 @@ header) before a single candidate, so a long-tail row holding one candidate
 costs five times what that candidate costs. Measured on the v3-31-1 input,
 1-2 syllable readings return 28,777 candidates per MB of resident memory
 while 6+ syllable readings return only 9,273. The budget therefore buys rows
-that serve words people actually type: --target-rank keeps a Chinese row only
-when one of its candidates is among the N most frequent words of the
-known-good CLEX, and --candidate-tiers truncates deeper on longer readings,
-which the candidate bar cannot show anyway. Against the full v3-31-1 table the
-top 50,000 words keep the same hit rate as the untrimmed pack (99.8% / 99.4% /
-99.0% for ranks 1-5k / 5k-20k / 20k-50k).
+that serve words people actually type, and it buys them with memory taken back
+from the tables that do not decide whether a word can be typed at all.
+
+CIME and CLEX are independent. Clink's own zh pack lists only 61.9% of its CIME
+candidates in CLEX, and only 63.4% of its first candidates, so a candidate is
+offered without a CLEX entry of its own. CLEX carries frequency help and the
+CNGM word IDs at ~50 bytes of resident memory per word, so --max-clex-words
+caps it near the official pack's size and the freed memory pays for CIME rows:
+at 150k readings that moves CLEX from 7.4 MB to 2.0 MB and CNGM from 6.0 MB to
+3.0 MB, and the 8.4 MB buys 94,585 more readings. Measured against the full
+v3-31-1 table, words ranked 50k-150k go from 6.6% to 84.6% reachable while the
+top 50,000 stay at 99.8% / 99.4% / 99.0%.
+
+--candidate-tiers truncates deeper on longer readings, which the candidate bar
+cannot show anyway. --target-rank is the opposite lever, for shrinking rather
+than growing: it keeps a Chinese row only when one of its candidates is among
+the N most frequent known-good words, so a small --max-readings spends its
+budget on common words first.
 
 What it removes:
   * readings the official zh table never uses: anything outside a-z, i.e.
@@ -237,8 +249,13 @@ def pinyin_typos(kept, syllables, sources, max_key, max_candidates=5):
                 slips.append((UMLAUT.sub(r'\1ue', part), False))
             for slip, strict in slips:
                 key = ''.join(parts[:i] + (slip,) + parts[i + 1:])
-                if len(key) <= max_key and key not in kept and not (strict and parses(key)):
-                    merged[key].append(rank)
+                # A strict slip must not shadow a reading that already exists. The
+                # umlaut slip may: "lue" is how people type "lüe" (略), and the
+                # lu+e split it also parses as (卤鹅) is far rarer. Both are kept,
+                # the umlaut word first, by the merge where rows are written.
+                if len(key) > max_key or (strict and (key in kept or parses(key))):
+                    continue
+                merged[key].append(rank)
     rows = {}
     for key, ranks in merged.items():
         candidates = []
@@ -293,9 +310,9 @@ def main():
     ap.add_argument('--code', default='zh')
     ap.add_argument('--source', type=Path, default=Path('source'))
     ap.add_argument('--out-dir', type=Path, default=Path('Lexicons'))
-    ap.add_argument('--max-readings', type=int, default=80000, help='Chinese readings kept')
+    ap.add_argument('--max-readings', type=int, default=150000, help='Chinese readings kept')
     ap.add_argument('--max-latin', type=int, default=12000, help='English / brand readings kept')
-    ap.add_argument('--target-rank', type=int, default=50000,
+    ap.add_argument('--target-rank', type=int, default=0,
                     help='keep a Chinese row only when it can produce one of the N most '
                          'frequent known-good words; 0 keeps every row the budget allows')
     ap.add_argument('--corrections', type=Path, nargs='*', default=[],
@@ -304,13 +321,16 @@ def main():
                     help='keep English typo aliases such as "githbu" -> GitHub')
     ap.add_argument('--pinyin-typo-words', type=int, default=20000,
                     help='most frequent words that also get Pinyin slip rows (0 disables slips)')
+    ap.add_argument('--max-clex-words', type=int, default=40000,
+                    help='cap CLEX at the N most frequent words a kept row can produce; '
+                         '0 keeps every one of them')
     ap.add_argument('--max-key', type=int, default=24, help='longest reading kept')
     ap.add_argument('--candidate-tiers', default='6:6,10:4,24:3',
                     help='per-reading-length candidate caps as len:cap pairs; longer '
                          'readings are more precise and need fewer candidates')
     ap.add_argument('--max-candidates', type=int, default=10,
                     help='candidates kept on multi-syllable rows')
-    ap.add_argument('--max-following', type=int, default=6,
+    ap.add_argument('--max-following', type=int, default=4,
                     help='next-word pairs kept per previous word (0 drops CNGM)')
     ap.add_argument('--receipt', type=Path)
     args = ap.parse_args()
@@ -416,11 +436,34 @@ def main():
     # Kept rows are the known-good rows truncated, never reordered.
     args.out_dir.mkdir(parents=True, exist_ok=True)
     cime_path = args.out_dir / f'{args.code}.cime'
+    def row(r):
+        if r in kept and r in typos:      # umlaut slip landing on a real reading
+            merged_row = list(typos[r]) + [c for c in kept[r] if c not in typos[r]]
+            return merged_row[:max(args.max_candidates, corrections.get(r, 0))]
+        return kept.get(r, typos.get(r))
+
     with cime_path.open('w', encoding='utf-8', newline='\n') as out:
         for r in sorted({**kept, **typos}):
-            out.write('\t'.join([r, *kept.get(r, typos.get(r))]) + '\n')
+            out.write('\t'.join([r, *row(r)]) + '\n')
 
-    keep_word_ids = sorted({word_id[norm(c)] for v in kept.values() for c in v if norm(c) in word_id})
+    kept_ids = {word_id[norm(c)] for r in {**kept, **typos} for c in row(r) if norm(c) in word_id}
+    if 0 < args.max_clex_words < len(kept_ids):
+        # CIME and CLEX are independent tables. Clink's own zh pack lists only
+        # 61.9% of its CIME candidates in CLEX (63.4% of the first candidates),
+        # so a candidate needs no CLEX entry to be offered. CLEX carries the
+        # frequency help and the CNGM word IDs, and costs ~50 bytes of resident
+        # memory per word, so cap it at the frequent words plus what the project
+        # protects and spend the rest of the budget on CIME rows instead.
+        must = {word_id[norm(c)] for r in protected if r in kept
+                for c in row(r) if norm(c) in word_id}
+        must |= {word_id[norm(w)] for w in terms if norm(w) in word_id}
+        must |= {word_id[norm(w)] for w in
+                 (*REGRESSION_EXACT.values(), *REGRESSION_CONTAINS.values(), *REGRESSION_TYPOS.values())
+                 if norm(w) in word_id}
+        must &= kept_ids
+        rest = sorted(kept_ids - must, key=lambda i: (-prob[i], words[i].encode()))
+        kept_ids = must | set(rest[:max(0, args.max_clex_words - len(must))])
+    keep_word_ids = sorted(kept_ids)
     write_clex(args.out_dir / f'{args.code}.clex', clex, keep_word_ids)
 
     cngm_path = args.out_dir / f'{args.code}.cngm'
@@ -466,6 +509,7 @@ def main():
         'maxKey': args.max_key,
         'targetRank': args.target_rank,
         'candidateTiers': args.candidate_tiers,
+        'maxClexWords': args.max_clex_words,
         'maxCandidates': args.max_candidates,
         'maxFollowing': args.max_following,
         'keepLatinTypos': args.keep_latin_typos,
