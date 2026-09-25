@@ -1,0 +1,260 @@
+name: Publish compact Clink Chinese Wanxiang Lite (v6 Fp1)
+
+# v6-lite-compact (Fp1): same pipeline as build-zh-wanxiang-v5-compact.yml,
+# but the known-good source is the v6-lite full release (Wanxiang lite tables,
+# toneless) and the compact params are the Fp1 experiment winner
+# (2026-09-26, validated at ~33.16 MB resident, 204,821 readings):
+#   --max-readings 178000 --candidate-tiers 6:5,10:3,24:2 --max-following 2
+#   (rest = v5 production params)
+# Fp1 fits +15.9% readings / +5.8% dedup words vs v5 under the same 34 MB
+# red line; 50k-150k band reach 78.92% -> 96.67%, top50k top5 stays 99.44%.
+#
+# Bring-up order (two releases):
+#   1. Run build-zh-wanxiang-v6-lite.yml once -> publishes vzh-wanxiang-v6-lite-z000001
+#      (full-size lite tables).
+#   2. Fill KNOWN_GOOD_CIME_SHA256 / KNOWN_GOOD_CLEX_SHA256 below from that
+#      release's zh--zh.cime / zh--zh.clex, commit, then run THIS workflow.
+# Until the SHAs are filled, the sha256sum -c step fails loudly on purpose.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_readings:
+        description: "Chinese readings kept (lower it if a future dict update pushes resident over 34 MB)"
+        required: true
+        default: "178000"
+      max_latin:
+        description: "English / brand readings kept"
+        required: true
+        default: "12000"
+      target_rank:
+        description: "Keep only rows that reach the N most frequent words; 0 = no such filter (keep 0: target-rank kills long-tail)"
+        required: true
+        default: "0"
+      max_clex_words:
+        description: "CLEX word cap (independent of CIME; official zh ships ~30k)"
+        required: true
+        default: "40000"
+  push:
+    branches: [main]
+    paths:
+      - "tools/compact_zh_pack.py"
+      - "source/zh-cuoyin-extra.tsv"
+      - ".github/zh-v6-lite-release-notes.md"
+      - ".github/workflows/build-zh-wanxiang-v6-lite-compact.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clink-zh-wanxiang-v6-lite-compact
+  cancel-in-progress: true
+
+jobs:
+  publish-compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      KNOWN_GOOD_TAG: vzh-wanxiang-v6-lite-z000001
+      KNOWN_GOOD_CIME_SHA256: FILL_ME_AFTER_FIRST_V6_LITE_RUN
+      KNOWN_GOOD_CLEX_SHA256: FILL_ME_AFTER_FIRST_V6_LITE_RUN
+      MAX_READINGS: ${{ inputs.max_readings || '178000' }}
+      MAX_LATIN: ${{ inputs.max_latin || '12000' }}
+      TARGET_RANK: ${{ inputs.target_rank || '0' }}
+      MAX_CLEX_WORDS: ${{ inputs.max_clex_words || '40000' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set lexically sortable release version
+        run: |
+          # v6-lite-compact sorts after every v5 tag, so an installed pack always sees an update.
+          printf -v run "%06d" "$GITHUB_RUN_NUMBER"
+          echo "VERSION=vzh-wanxiang-v6-lite-compact-z${run}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Download known-good v6-lite assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _known_good
+          mkdir -p _known_good
+          gh release download "$KNOWN_GOOD_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'zh--zh.cime' \
+            --pattern 'zh--zh.clex' \
+            --pattern 'wanxiang-source.json' \
+            --dir _known_good
+          echo "$KNOWN_GOOD_CIME_SHA256  _known_good/zh--zh.cime" | sha256sum -c -
+          echo "$KNOWN_GOOD_CLEX_SHA256  _known_good/zh--zh.clex" | sha256sum -c -
+
+      - name: Download Wanxiang lite correction table
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _wanxiang
+          mkdir -p _wanxiang
+          gh release download dict-nightly \
+            --repo amzxyz/rime-wanxiang \
+            --pattern lite-dicts.zip \
+            --dir _wanxiang
+          # cuoyin.lite is Wanxiang's only correction table (wrong readings /
+          # characters); duoyin.lite is ordinary vocabulary there.
+          unzip -q -j _wanxiang/lite-dicts.zip '*cuoyin.lite.dict.yaml' -d _wanxiang
+          sha256sum _wanxiang/cuoyin.lite.dict.yaml
+
+      - name: Build compact pack (Fp1 params)
+        run: |
+          set -euo pipefail
+          # Only zh may be released from this repository.
+          find Lexicons -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          python3 tools/compact_zh_pack.py \
+            --cime _known_good/zh--zh.cime \
+            --clex _known_good/zh--zh.clex \
+            --source ./source \
+            --max-readings "$MAX_READINGS" \
+            --max-latin "$MAX_LATIN" \
+            --target-rank "$TARGET_RANK" \
+            --max-clex-words "$MAX_CLEX_WORDS" \
+            --candidate-tiers "6:5,10:3,24:2" \
+            --max-following 2 \
+            --corrections _wanxiang/cuoyin.lite.dict.yaml \
+            --receipt compact-receipt.json
+          python3 tools/validate-pack.py zh
+          ls -l Lexicons
+
+      - name: Enforce keyboard memory budget
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sizes = {p.name: p.stat().st_size for p in sorted(Path('Lexicons').iterdir())}
+          total = sum(sizes.values())
+          print(sizes, 'total', total)
+          # v3-31-1 was 44.9 MB (20.4 MB CIME) and crashed the keyboard. The
+          # largest official pack (mt) is ~13.5 MB; stay in that family.
+          if set(sizes) != {'zh.cime', 'zh.clex', 'zh.cngm'}:
+              raise SystemExit(f'unexpected assets: {sorted(sizes)}')
+          if sizes['zh.cime'] > 7_000_000 or total > 10_000_000:
+              raise SystemExit('Pack too large for the Clink keyboard; lower max_readings / max_latin.')
+
+          # File size is not what iOS kills the extension for: resident memory is.
+          # A Swift [String: [String]] costs ~64 B per row before any candidate,
+          # so rows, candidates and CLEX words are the terms that matter here.
+          # v5-z000002 measured ~38 MB this way and still froze intermittently.
+          import struct
+          rows = [l.split('\t') for l in Path('Lexicons/zh.cime').read_text(encoding='utf-8').splitlines()]
+          cime = sum(64 + 16 * (len(f) - 1)
+                     + sum(32 + len(x.encode()) for x in f if len(x.encode()) > 15)
+                     for f in rows) * 1.4
+          d = Path('Lexicons/zh.clex').read_bytes()
+          count, alpha = struct.unpack_from('<II', d, 8)
+          off = 16 + 4 * alpha + (alpha + 1) * alpha
+          offs = struct.unpack_from(f'<{count + 1}I', d, off)
+          wb = sum(16 + (32 + (offs[i + 1] - offs[i]) if offs[i + 1] - offs[i] > 15 else 0)
+                   for i in range(count))
+          clex = wb + 32 + (wb + count * 8) * 1.4
+          g = Path('Lexicons/zh.cngm').read_bytes()
+          pairs = struct.unpack_from('<I', g, 8)[0]
+          groups = len(set(struct.unpack_from(f'<{pairs}I', g, 12)))
+          cngm = (groups * 56 + pairs * 8) * 1.4
+          resident = (cime + clex + cngm) / 1e6
+          print(f'estimated resident: {resident:.1f} MB '
+                f'(cime {cime/1e6:.1f} + clex {clex/1e6:.1f} + cngm {cngm/1e6:.1f}), '
+                f'{len(rows):,} rows, {count:,} words, {pairs:,} pairs')
+          # v5-z000002 measured 38.4 MB and froze intermittently; z000003/4 measured
+          # 25.6 MB and did not. Stay clearly below the known-bad figure.
+          # Fp1 sits at ~33.2 MB: only ~0.8 MB of headroom. If a future Wanxiang
+          # update pushes this over, lower max_readings one notch (each 1k rows ~= 0.17 MB).
+          if resident > 34:
+              raise SystemExit(f'{resident:.1f} MB resident is too close to the iOS keyboard '
+                               f'limit; lower max_readings, or set target_rank to spend '
+                               f'a smaller budget on common words first.')
+
+          # Fill the release notes from what actually shipped, so the published
+          # description can never drift from the bytes it describes.
+          import os
+          notes = Path('.github/zh-v6-lite-release-notes.md').read_text(encoding='utf-8')
+          Path('release-notes.md').write_text(
+              notes.format(pack_mb=f'{total/1e6:.2f}', resident_mb=f'{resident:.1f}',
+                           rows=f'{len(rows):,}', words=f'{count:,}', pairs=f'{pairs:,}',
+                           target_rank=os.environ['TARGET_RANK']),
+              encoding='utf-8')
+          PY
+
+      - name: Create source receipt
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          receipt = {
+              'profile': 'v6-lite-compact-fp1',
+              'derivedFromTag': 'vzh-wanxiang-v6-lite-z000001',
+              'note': 'Rows and candidate order are taken from the v6-lite full release and only truncated (Fp1: tiers 6:5,10:3,24:2, max-following 2, 178k readings); CNGM is rebuilt on the final CLEX IDs.',
+              'compaction': json.loads(Path('compact-receipt.json').read_text(encoding='utf-8')),
+              'correctionTables': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                   for p in sorted(Path('_wanxiang').glob('*.dict.yaml'))},
+              'knownGoodSourceReceipt': json.loads(Path('_known_good/wanxiang-source.json').read_text(encoding='utf-8')),
+          }
+          Path('wanxiang-source.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
+
+      - name: Build manifest containing only zh
+        run: |
+          set -euo pipefail
+          rm -rf out
+          mkdir -p out
+          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
+          assert [p['code'] for p in m['packs']] == ['zh'], m
+          assets = {a['path'] for a in m['packs'][0]['assets']}
+          assert assets == {'zh.cime', 'zh.clex', 'zh.cngm'}, assets
+          print('Compact manifest verified:', m['version'], sorted(assets))
+          PY
+
+      - name: Publish as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --title "Clink 中文万象 v6 lite compact (Fp1) — $VERSION" \
+            --notes-file release-notes.md
+          gh release upload "$VERSION" \
+            out/assets/zh--zh.cime \
+            out/assets/zh--zh.clex \
+            out/assets/zh--zh.cngm \
+            out/manifest.json \
+            wanxiang-source.json
+          gh release edit "$VERSION" --draft=false --latest
+
+      - name: Verify published bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/release-check"
+          mkdir -p "$RUNNER_TEMP/release-check"
+          gh release download "$VERSION" --dir "$RUNNER_TEMP/release-check"
+          cmp out/manifest.json "$RUNNER_TEMP/release-check/manifest.json"
+          cmp Lexicons/zh.cime "$RUNNER_TEMP/release-check/zh--zh.cime"
+          cmp Lexicons/zh.clex "$RUNNER_TEMP/release-check/zh--zh.clex"
+          cmp Lexicons/zh.cngm "$RUNNER_TEMP/release-check/zh--zh.cngm"
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          test "$latest" = "$VERSION"
+          echo "Verified compact latest release: $latest"
