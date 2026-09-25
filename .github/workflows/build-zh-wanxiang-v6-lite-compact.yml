@@ -57,8 +57,8 @@ jobs:
     env:
       PYTHONUTF8: "1"
       KNOWN_GOOD_TAG: vzh-wanxiang-v6-lite-z000001
-      KNOWN_GOOD_CIME_SHA256: FILL_ME_AFTER_FIRST_V6_LITE_RUN
-      KNOWN_GOOD_CLEX_SHA256: FILL_ME_AFTER_FIRST_V6_LITE_RUN
+      KNOWN_GOOD_CIME_SHA256: 53be3c5eba18972534dfbb94f819078a45ca3275c58e76d8bb4379130084e5ad
+      KNOWN_GOOD_CLEX_SHA256: b13454c0fd778af44203e4ac560f2e73654085243e132deda105055a18f1cc9a
       MAX_READINGS: ${{ inputs.max_readings || '178000' }}
       MAX_LATIN: ${{ inputs.max_latin || '12000' }}
       TARGET_RANK: ${{ inputs.target_rank || '0' }}
