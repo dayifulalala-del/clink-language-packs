@@ -147,6 +147,7 @@ jobs:
             --latin-terms source/zh-latin-terms.tsv \
             --custom-terms source/zh-domain-terms.tsv \
             --shortcut-terms source/zh-shortcuts.tsv \
+            --blocklist source/zh-trad-blocklist.tsv \
             --english-limit 20000 \
             --english-typo-limit 2500 \
             --jianpin-limit 50000 \
