@@ -317,6 +317,10 @@ def main():
     ap.add_argument('--blocklist', type=Path,
                       help='one word per line; matching candidates are dropped '
                            'from every table (simplified-only packs)')
+    ap.add_argument('--bulk-abbrevs', type=Path, default=None,
+                      help='mined initials-abbrev backfill (word<TAB>spaced reading<TAB>weight); '
+                           'merged AFTER auto-jianpin at minimal score so native '
+                           'candidates keep their rank and keys')
 
     ap.add_argument('--jianpin-limit', type=int, default=50000)
     ap.add_argument('--core-compact-reading-budget', type=int, default=450000)
@@ -565,6 +569,33 @@ def main():
             add_candidate(readings, key, word, meta[0], meta[1], meta[2])
         protected.add(key)
     print(f'Added {len(jianpin_rows):,} non-conflicting jianpin readings.')
+
+    # CHANGE (bulk backfill): mined initials abbrevs are merged AFTER the
+    # auto-jianpin above, at minimal score, so they can never outrank or
+    # block a native candidate for the same reading. A brand-new reading
+    # gets the word as its (only) candidate; an existing reading gains it
+    # at the tail. (The --shortcut-terms lane carries score 1e9 by design
+    # for a handful of hand-picked shortcuts; bulk backfill must not use it.)
+    if args.bulk_abbrevs:
+        if not args.bulk_abbrevs.is_file():
+            raise SystemExit(f'Bulk abbrevs file not found: {args.bulk_abbrevs}')
+        print(f'Reading bulk abbrev backfill {args.bulk_abbrevs} ...')
+        n_bulk = 0
+        for word, raw_reading, weight, _lineno in parse_custom_terms(args.bulk_abbrevs):
+            if not cjk_only(word):
+                continue
+            parts = normalize_mixed_code(raw_reading)
+            if not parts:
+                continue
+            seen += 1
+            lex = word.lower()
+            candidate_lexicon[word] = lex
+            freqs[lex] = max(freqs.get(lex, 0.0), 6000.0)
+            compact = ''.join(parts)
+            add_candidate(readings, compact, word, 1.0, weight, seen)
+            protected.add(compact)
+            n_bulk += 1
+        print(f'Merged {n_bulk:,} bulk abbrev rows (minimal score, post-jianpin).')
 
     # Reserve a large compact-only slice for ordinary Wanxiang jichu Pinyin.
     # Compact keys are what users physically type (e.g. dihao). Keeping these
