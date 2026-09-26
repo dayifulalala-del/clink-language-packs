@@ -280,8 +280,9 @@ def protected_terms(source: Path):
     terms, readings = set(), set()
     shortcuts = source / 'zh-shortcuts.tsv'
     domain = source / 'zh-domain-terms.tsv'
+    bulk_abbrevs = source / 'zh-bulk-abbrevs.tsv'
     latin = source / 'zh-latin-terms.tsv'
-    for path in (shortcuts, domain):
+    for path in (shortcuts, domain, bulk_abbrevs):
         if not path.exists():
             continue
         for raw in path.read_text(encoding='utf-8').splitlines():
