@@ -94,6 +94,8 @@ def main() -> None:
     p.add_argument("--latin-terms", type=Path, default=Path("source/zh-latin-terms.tsv"))
     p.add_argument("--custom-terms", type=Path, default=Path("source/zh-domain-terms.tsv"))
     p.add_argument("--shortcut-terms", type=Path, default=Path("source/zh-shortcuts.tsv"))
+    p.add_argument("--blocklist", type=Path, default=None,
+                       help="one word per line; forwarded to the v2 delegate")
     p.add_argument("--english-limit", type=int, default=20000)
     p.add_argument("--english-typo-limit", type=int, default=2500)
     p.add_argument("--jianpin-limit", type=int, default=50000)
@@ -138,6 +140,10 @@ def main() -> None:
         if not args.shortcut_terms.is_file():
             raise SystemExit(f"Missing shortcut terms file: {args.shortcut_terms}")
         command += ["--shortcut-terms", str(args.shortcut_terms)]
+    if args.blocklist:
+        if not args.blocklist.is_file():
+            raise SystemExit(f"Missing blocklist file: {args.blocklist}")
+        command += ["--blocklist", str(args.blocklist)]
     subprocess.run(command, check=True)
 
     ime = args.out_dir / f"{args.code}-ime.tsv"
@@ -180,6 +186,11 @@ def main() -> None:
                 "sha256": sha256(args.shortcut_terms),
                 "byteCount": args.shortcut_terms.stat().st_size,
             } if args.shortcut_terms else None),
+            "blocklist": ({
+                "path": str(args.blocklist),
+                "sha256": sha256(args.blocklist),
+                "byteCount": args.blocklist.stat().st_size,
+            } if args.blocklist else None),
             "standardTables": [
                 {
                     "name": name,
