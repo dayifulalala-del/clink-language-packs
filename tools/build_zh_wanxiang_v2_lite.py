@@ -314,6 +314,9 @@ def main():
     ap.add_argument('--mixed-dict', type=Path)
     ap.add_argument('--custom-terms', type=Path)
     ap.add_argument('--shortcut-terms', type=Path)
+    ap.add_argument('--blocklist', type=Path,
+                      help='one word per line; matching candidates are dropped '
+                           'from every table (simplified-only packs)')
 
     ap.add_argument('--jianpin-limit', type=int, default=50000)
     ap.add_argument('--core-compact-reading-budget', type=int, default=450000)
@@ -338,6 +341,15 @@ def main():
         'mingtian', 'ming tian', 'zhongwen', 'zhong wen',
         'shurufa', 'shu ru fa', 'suoyi', 'suo yi',
     }
+    blocked: set[str] = set()
+    if args.blocklist:
+        if not args.blocklist.is_file():
+            raise SystemExit(f'Blocklist file not found: {args.blocklist}')
+        for raw in args.blocklist.read_text(encoding='utf-8-sig', errors='replace').splitlines():
+            line = raw.strip()
+            if line and not line.startswith('#'):
+                blocked.add(unicodedata.normalize('NFC', line))
+        print(f'Loaded {len(blocked):,} blocklisted words from {args.blocklist}.')
     special_scores: dict[str, float] = {}
     long_scores: dict[str, float] = {}
     # Normal compact Pinyin from Wanxiang jichu is the backbone of the pack.
@@ -576,6 +588,21 @@ def main():
         protected.add(key)
     for key, _score in sorted(long_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:args.long_phrase_reading_budget]:
         protected.add(key)
+
+    # CHANGE (simplified-only): drop blocklisted traditional words from every
+    # table before ranking/writing, so the pack ships simplified only.
+    if blocked:
+        for key in list(readings):
+            cands = readings[key]
+            for cand in [c for c in cands if c in blocked]:
+                del cands[cand]
+            if not cands:
+                del readings[key]
+        for w in [w for w in freqs if w in blocked]:
+            del freqs[w]
+        for w in [w for w in candidate_lexicon if w in blocked]:
+            del candidate_lexicon[w]
+        print(f'Excluded {len(blocked):,} blocklisted words from IME tables.')
 
     ranked_words = sorted(freqs, key=lambda w: (-word_score(w, freqs[w]), -freqs[w], len(w), w))
     keep = set(ranked_words[:args.lexicon_limit] if args.lexicon_limit else ranked_words)
