@@ -96,6 +96,8 @@ def main() -> None:
     p.add_argument("--shortcut-terms", type=Path, default=Path("source/zh-shortcuts.tsv"))
     p.add_argument("--blocklist", type=Path, default=None,
                        help="one word per line; forwarded to the v2 delegate")
+    p.add_argument("--bulk-abbrevs", type=Path, default=None,
+                       help="mined initials-abbrev backfill; forwarded to the v2 delegate")
     p.add_argument("--english-limit", type=int, default=20000)
     p.add_argument("--english-typo-limit", type=int, default=2500)
     p.add_argument("--jianpin-limit", type=int, default=50000)
@@ -144,6 +146,10 @@ def main() -> None:
         if not args.blocklist.is_file():
             raise SystemExit(f"Missing blocklist file: {args.blocklist}")
         command += ["--blocklist", str(args.blocklist)]
+    if args.bulk_abbrevs:
+        if not args.bulk_abbrevs.is_file():
+            raise SystemExit(f"Missing bulk abbrevs file: {args.bulk_abbrevs}")
+        command += ["--bulk-abbrevs", str(args.bulk_abbrevs)]
     subprocess.run(command, check=True)
 
     ime = args.out_dir / f"{args.code}-ime.tsv"
