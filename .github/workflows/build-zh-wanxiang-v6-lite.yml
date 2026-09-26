@@ -43,7 +43,7 @@ concurrency:
 
 env:
   PYTHONUTF8: "1"
-  VERSION: vzh-wanxiang-v6-lite-z000001
+  VERSION: vzh-wanxiang-v6-lite-z000002
 
 jobs:
   publish-lite:
