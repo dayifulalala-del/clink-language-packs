@@ -1,0 +1,233 @@
+name: Probe compact Clink Chinese Wanxiang Lite (memory ceiling)
+
+# 内存天花板探测：34MB 是用户 iPhone 实测的保守线（38.4MB 间歇卡死，
+# 25.6MB 正常），真实 iOS 杀键盘扩展的阈值未知。用 workflow_dispatch
+# 输入不同预算，打 45/55/65MB 三档 probe 包，在真机上实测哪档稳定。
+#
+# Probe 包发布为 prerelease，永远不抢 latest，不影响正常更新通道。
+# 构建参数除 max-readings / max-clex-words 外与 Fp1 完全一致
+# （candidate-tiers 6:5,10:3,24:2，max-following 2），只隔离内存变量。
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_tag:
+        description: "Probe name, e.g. probe45m (used in the release tag)"
+        required: true
+      max_readings:
+        description: "Chinese readings kept"
+        required: true
+        default: "240000"
+      max_clex_words:
+        description: "CLEX word cap"
+        required: true
+        default: "60000"
+      resident_cap_mb:
+        description: "Fail the build if estimated resident exceeds this (safety rail)"
+        required: true
+        default: "50"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clink-zh-wanxiang-v6-lite-compact-probe
+  cancel-in-progress: false
+
+jobs:
+  probe-compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+      KNOWN_GOOD_TAG: vzh-wanxiang-v6-lite-z000003
+      KNOWN_GOOD_CIME_SHA256: 4962a5f6748c8078967d81e8d70bd58b9171ef05c7c4e482a33ba5e25711352a
+      KNOWN_GOOD_CLEX_SHA256: 0a05d1b3d1c84648e2d27929b35b8fc1716e468ee055ef10082594306b080205
+      PROBE_TAG: ${{ inputs.probe_tag }}
+      MAX_READINGS: ${{ inputs.max_readings }}
+      MAX_CLEX_WORDS: ${{ inputs.max_clex_words }}
+      RESIDENT_CAP_MB: ${{ inputs.resident_cap_mb }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set lexically sortable probe version
+        run: |
+          printf -v run "%06d" "$GITHUB_RUN_NUMBER"
+          echo "VERSION=vzh-wanxiang-v6-lite-compact-${PROBE_TAG}-z${run}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Download known-good v6-lite assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _known_good
+          mkdir -p _known_good
+          gh release download "$KNOWN_GOOD_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'zh--zh.cime' \
+            --pattern 'zh--zh.clex' \
+            --pattern 'wanxiang-source.json' \
+            --dir _known_good
+          echo "$KNOWN_GOOD_CIME_SHA256  _known_good/zh--zh.cime" | sha256sum -c -
+          echo "$KNOWN_GOOD_CLEX_SHA256  _known_good/zh--zh.clex" | sha256sum -c -
+
+      - name: Download Wanxiang lite correction table
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _wanxiang
+          mkdir -p _wanxiang
+          gh release download dict-nightly \
+            --repo amzxyz/rime-wanxiang \
+            --pattern lite-dicts.zip \
+            --dir _wanxiang
+          unzip -q -j _wanxiang/lite-dicts.zip '*cuoyin.lite.dict.yaml' -d _wanxiang
+          sha256sum _wanxiang/cuoyin.lite.dict.yaml
+
+      - name: Build probe pack (Fp1 params, bigger budget)
+        run: |
+          set -euo pipefail
+          find Lexicons -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          python3 tools/compact_zh_pack.py \
+            --cime _known_good/zh--zh.cime \
+            --clex _known_good/zh--zh.clex \
+            --source ./source \
+            --max-readings "$MAX_READINGS" \
+            --max-latin 12000 \
+            --target-rank 0 \
+            --max-clex-words "$MAX_CLEX_WORDS" \
+            --candidate-tiers "6:5,10:3,24:2" \
+            --max-following 2 \
+            --corrections _wanxiang/cuoyin.lite.dict.yaml \
+            --receipt compact-receipt.json
+          python3 tools/validate-pack.py zh
+          ls -l Lexicons
+
+      - name: Enforce probe memory budget
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          sizes = {p.name: p.stat().st_size for p in sorted(Path('Lexicons').iterdir())}
+          total = sum(sizes.values())
+          print(sizes, 'total', total)
+          if set(sizes) != {'zh.cime', 'zh.clex', 'zh.cngm'}:
+              raise SystemExit(f'unexpected assets: {sorted(sizes)}')
+          if sizes['zh.cime'] > 15_000_000 or total > 20_000_000:
+              raise SystemExit('Probe pack unexpectedly large; check params.')
+
+          import struct
+          rows = [l.split('\t') for l in Path('Lexicons/zh.cime').read_text(encoding='utf-8').splitlines()]
+          cime = sum(64 + 16 * (len(f) - 1)
+                     + sum(32 + len(x.encode()) for x in f if len(x.encode()) > 15)
+                     for f in rows) * 1.4
+          d = Path('Lexicons/zh.clex').read_bytes()
+          count, alpha = struct.unpack_from('<II', d, 8)
+          off = 16 + 4 * alpha + (alpha + 1) * alpha
+          offs = struct.unpack_from(f'<{count + 1}I', d, off)
+          wb = sum(16 + (32 + (offs[i + 1] - offs[i]) if offs[i + 1] - offs[i] > 15 else 0)
+                   for i in range(count))
+          clex = wb + 32 + (wb + count * 8) * 1.4
+          g = Path('Lexicons/zh.cngm').read_bytes()
+          pairs = struct.unpack_from('<I', g, 8)[0]
+          groups = len(set(struct.unpack_from(f'<{pairs}I', g, 12)))
+          cngm = (groups * 56 + pairs * 8) * 1.4
+          resident = (cime + clex + cngm) / 1e6
+          print(f'estimated resident: {resident:.1f} MB '
+                f'(cime {cime/1e6:.1f} + clex {clex/1e6:.1f} + cngm {cngm/1e6:.1f}), '
+                f'{len(rows):,} rows, {count:,} words, {pairs:,} pairs')
+          cap = float(os.environ['RESIDENT_CAP_MB'])
+          if resident > cap:
+              raise SystemExit(f'{resident:.1f} MB resident exceeds probe cap {cap} MB; '
+                               f'lower max_readings / max_clex_words.')
+
+          tag = os.environ['PROBE_TAG']
+          notes = (
+              f"内存天花板探测版（{tag}），{total/1e6:.2f} MB：{len(rows):,} 个 reading、"
+              f"{count:,} 个词、{pairs:,} 条下一词转移，估算常驻内存约 {resident:.1f} MB。\n\n"
+              "这是 34MB 保守红线取消后的探测包，只在 iPhone 真机上试用，不要当日常包。\n"
+              "测试方法：安装后正常打字 10 分钟，观察键盘是否卡死、被系统杀掉（闪退回系统键盘）。\n\n"
+              "如果这档稳定，说明真线在这之上；如果卡死或闪退，退回上一档。\n"
+              "最终正式版按测出的真线打。构建参数除 max-readings / max-clex-words 外与 Fp1 一致。\n"
+          )
+          Path('release-notes.md').write_text(notes, encoding='utf-8')
+          PY
+
+      - name: Create source receipt
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          receipt = {
+              'profile': 'v6-lite-compact-probe',
+              'probeTag': os.environ['PROBE_TAG'],
+              'note': 'Memory-ceiling probe: Fp1 params with a bigger readings/clex budget.',
+              'compaction': json.loads(Path('compact-receipt.json').read_text(encoding='utf-8')),
+              'correctionTables': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                   for p in sorted(Path('_wanxiang').glob('*.dict.yaml'))},
+              'knownGoodSourceReceipt': json.loads(Path('_known_good/wanxiang-source.json').read_text(encoding='utf-8')),
+          }
+          Path('wanxiang-source.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
+
+      - name: Build manifest containing only zh
+        run: |
+          set -euo pipefail
+          rm -rf out
+          mkdir -p out
+          python3 tools/build-release-manifest.py "$VERSION" "$GITHUB_REPOSITORY" out
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
+          assert [p['code'] for p in m['packs']] == ['zh'], m
+          assets = {a['path'] for a in m['packs'][0]['assets']}
+          assert assets == {'zh.cime', 'zh.clex', 'zh.cngm'}, assets
+          print('Probe manifest verified:', m['version'], sorted(assets))
+          PY
+
+      - name: Publish as prerelease (never latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --prerelease \
+            --title "Clink 中文万象 v6 lite compact 内存探测版 (${PROBE_TAG}) — $VERSION" \
+            --notes-file release-notes.md
+          gh release upload "$VERSION" \
+            out/assets/zh--zh.cime \
+            out/assets/zh--zh.clex \
+            out/assets/zh--zh.cngm \
+            out/manifest.json \
+            wanxiang-source.json
+          gh release edit "$VERSION" --draft=false
+          echo "Published probe prerelease: $VERSION (not latest)"
+
+      - name: Verify published bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/release-check"
+          mkdir -p "$RUNNER_TEMP/release-check"
+          gh release download "$VERSION" --dir "$RUNNER_TEMP/release-check"
+          cmp out/manifest.json "$RUNNER_TEMP/release-check/manifest.json"
+          cmp Lexicons/zh.cime "$RUNNER_TEMP/release-check/zh--zh.cime"
+          cmp Lexicons/zh.clex "$RUNNER_TEMP/release-check/zh--zh.clex"
+          cmp Lexicons/zh.cngm "$RUNNER_TEMP/release-check/zh--zh.cngm"
+          echo "Verified probe prerelease bytes: $VERSION"
