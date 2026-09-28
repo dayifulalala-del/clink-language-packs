@@ -87,6 +87,7 @@ REGRESSION_EXACT = {
     'computer': 'computer', 'maopeifang': '毛坯房',
     'heilongjiang': '黑龙江', 'ruanluyou': '软路由', 'weishenme': '为什么',
     'buzhidao': '不知道', 'chatgpt': 'ChatGPT', 'python': 'Python',
+    'tinghao': '挺好', 'dabuchulai': '打不出来',
 }
 REGRESSION_CONTAINS = {'bzd': '不知道', 'wsm': '为什么', 'zmhs': '怎么回事', 'yyds': 'YYDS'}
 TONELESS = str.maketrans({ch: base for base, marks in {
@@ -458,12 +459,34 @@ def main():
         must = {word_id[norm(c)] for r in protected if r in kept
                 for c in row(r) if norm(c) in word_id}
         must |= {word_id[norm(w)] for w in terms if norm(w) in word_id}
-        must |= {word_id[norm(w)] for w in
-                 (*REGRESSION_EXACT.values(), *REGRESSION_CONTAINS.values(), *REGRESSION_TYPOS.values())
-                 if norm(w) in word_id}
+        regression_ids = {word_id[norm(w)] for w in
+                          (*REGRESSION_EXACT.values(), *REGRESSION_CONTAINS.values(),
+                           *REGRESSION_TYPOS.values())
+                          if norm(w) in word_id}
+        must |= regression_ids
         must &= kept_ids
-        rest = sorted(kept_ids - must, key=lambda i: (-prob[i], words[i].encode()))
-        kept_ids = must | set(rest[:max(0, args.max_clex_words - len(must))])
+        regression_ids &= kept_ids
+        by_prob = lambda i: (-prob[i], words[i].encode())
+        # The protected set alone can exceed the whole budget (41,183 must vs
+        # a 40,000-word budget in z000006-1), which left zero slots for the
+        # frequency-ranked rest: even top-5000 words were dropped and sentence
+        # composition fell back to tying single characters (e.g. 听 vs 挺).
+        # Frequency core first, then protection fills the remainder.
+        freq_share = args.max_clex_words // 2
+        freq_core = set(sorted(kept_ids - must, key=by_prob)[:freq_share])
+        keep = set(must) | freq_core
+        if len(keep) > args.max_clex_words:
+            # Protection overflowed the budget: trim its least frequent words.
+            # Regression words and the frequency core are never trimmed.
+            droppable = sorted(keep - regression_ids - freq_core, key=by_prob,
+                               reverse=True)
+            keep.difference_update(droppable[:len(keep) - args.max_clex_words])
+        else:
+            for i in sorted(kept_ids - keep, key=by_prob):
+                if len(keep) >= args.max_clex_words:
+                    break
+                keep.add(i)
+        kept_ids = keep
     keep_word_ids = sorted(kept_ids)
     write_clex(args.out_dir / f'{args.code}.clex', clex, keep_word_ids)
 
