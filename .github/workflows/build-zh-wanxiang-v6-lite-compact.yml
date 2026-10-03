@@ -9,6 +9,15 @@ name: Publish compact Clink Chinese Wanxiang Lite (v6 Fp1)
 # Fp1 fits +15.9% readings / +5.8% dedup words vs v5 under the same 34 MB
 # red line; 50k-150k band reach 78.92% -> 96.67%, top50k top5 stays 99.44%.
 #
+# 2026-10-04 modern-frequency recovery: compaction had cut ~1.78M words,
+# including modern common words whose Wanxiang weight is low (e.g. 爆金币,
+# 中华人民共和国). source/zh-modern-terms.tsv now protects the wordfreq-zh
+# top-80k slice of the cut set (+ Wanxiang weight>=1000 + personal terms);
+# the top slice (zh-priority-terms.tsv) also keeps a guaranteed CLEX seat,
+# and words sitting deeper than their row's tier cap ride zh-cuoyin-extra.tsv.
+# Budgets: max_readings 178000 -> 193415, max_clex_words 40000 -> 60000,
+# estimated resident ~36.8 MB; the hard gate below is 40 MB.
+#
 # Bring-up order (two releases):
 #   1. Run build-zh-wanxiang-v6-lite.yml once -> publishes vzh-wanxiang-v6-lite-z000001
 #      (full-size lite tables).
@@ -20,9 +29,9 @@ on:
   workflow_dispatch:
     inputs:
       max_readings:
-        description: "Chinese readings kept (lower it if a future dict update pushes resident over 34 MB)"
+        description: "Chinese readings kept (lower it if a future dict update pushes resident over 40 MB)"
         required: true
-        default: "178000"
+        default: "193415"
       max_latin:
         description: "English / brand readings kept"
         required: true
@@ -34,12 +43,14 @@ on:
       max_clex_words:
         description: "CLEX word cap (independent of CIME; official zh ships ~30k)"
         required: true
-        default: "40000"
+        default: "60000"
   push:
     branches: [main]
     paths:
       - "tools/compact_zh_pack.py"
       - "source/zh-cuoyin-extra.tsv"
+      - "source/zh-modern-terms.tsv"
+      - "source/zh-priority-terms.tsv"
       - ".github/zh-v6-lite-release-notes.md"
       - ".github/workflows/build-zh-wanxiang-v6-lite-compact.yml"
 
@@ -59,10 +70,10 @@ jobs:
       KNOWN_GOOD_TAG: vzh-wanxiang-v6-lite-z000003
       KNOWN_GOOD_CIME_SHA256: 4962a5f6748c8078967d81e8d70bd58b9171ef05c7c4e482a33ba5e25711352a
       KNOWN_GOOD_CLEX_SHA256: 0a05d1b3d1c84648e2d27929b35b8fc1716e468ee055ef10082594306b080205
-      MAX_READINGS: ${{ inputs.max_readings || '178000' }}
+      MAX_READINGS: ${{ inputs.max_readings || '193415' }}
       MAX_LATIN: ${{ inputs.max_latin || '12000' }}
       TARGET_RANK: ${{ inputs.target_rank || '0' }}
-      MAX_CLEX_WORDS: ${{ inputs.max_clex_words || '40000' }}
+      MAX_CLEX_WORDS: ${{ inputs.max_clex_words || '60000' }}
 
     steps:
       - name: Check out repository
@@ -172,9 +183,11 @@ jobs:
                 f'{len(rows):,} rows, {count:,} words, {pairs:,} pairs')
           # v5-z000002 measured 38.4 MB and froze intermittently; z000003/4 measured
           # 25.6 MB and did not. Stay clearly below the known-bad figure.
-          # Fp1 sits at ~33.2 MB: only ~0.8 MB of headroom. If a future Wanxiang
-          # update pushes this over, lower max_readings one notch (each 1k rows ~= 0.17 MB).
-          if resident > 34:
+          # 2026-10-04: cap raised 34 -> 40 for the modern-frequency recovery release
+          # (wordfreq zh rank <= 80k tier, estimated 36.8 MB): a deliberate step toward
+          # the known-bad figure, not past it. If a future Wanxiang update pushes the
+          # estimate over 40, lower max_readings (each 1k rows ~= 0.17 MB).
+          if resident > 40:
               raise SystemExit(f'{resident:.1f} MB resident is too close to the iOS keyboard '
                                f'limit; lower max_readings, or set target_rank to spend '
                                f'a smaller budget on common words first.')

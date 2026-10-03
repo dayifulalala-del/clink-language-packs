@@ -283,7 +283,9 @@ def protected_terms(source: Path):
     domain = source / 'zh-domain-terms.tsv'
     bulk_abbrevs = source / 'zh-bulk-abbrevs.tsv'
     latin = source / 'zh-latin-terms.tsv'
-    for path in (shortcuts, domain, bulk_abbrevs):
+    # zh-modern-terms.tsv: modern-frequency recovery terms (wordfreq-based).
+    modern = source / 'zh-modern-terms.tsv'
+    for path in (shortcuts, domain, bulk_abbrevs, modern):
         if not path.exists():
             continue
         for raw in path.read_text(encoding='utf-8').splitlines():
@@ -302,7 +304,14 @@ def protected_terms(source: Path):
             terms.add(fields[0].strip())
             if len(fields) > 2:
                 readings.update(a.strip().lower() for a in fields[2].split(',') if a.strip())
-    return terms, readings
+    # zh-priority-terms.tsv: highest-value recovery terms; CLEX trimming never drops them.
+    priority = set()
+    prio_path = source / 'zh-priority-terms.tsv'
+    if prio_path.exists():
+        for raw in prio_path.read_text(encoding='utf-8').splitlines():
+            if raw.strip() and not raw.lstrip().startswith('#'):
+                priority.add(raw.split('\t')[0].strip())
+    return terms, readings, priority
 
 
 def main():
@@ -398,7 +407,7 @@ def main():
             if word in rows.get(reading, []):
                 corrections[reading] = max(corrections.get(reading, 0), rows[reading].index(word) + 1)
 
-    terms, manual_readings = protected_terms(args.source)
+    terms, manual_readings, priority_terms = protected_terms(args.source)
     protected = set(syllables) | set(corrections)
     protected.update(r for r in manual_readings if r in rows)
     protected.update(r for r in REGRESSION_EXACT if r in rows)
@@ -466,6 +475,9 @@ def main():
         must |= regression_ids
         must &= kept_ids
         regression_ids &= kept_ids
+        # Priority recovery terms keep their CLEX seat, like regression terms.
+        priority_ids = {word_id[norm(w)] for w in priority_terms if norm(w) in word_id}
+        priority_ids &= kept_ids
         by_prob = lambda i: (-prob[i], words[i].encode())
         # The protected set alone can exceed the whole budget (41,183 must vs
         # a 40,000-word budget in z000006-1), which left zero slots for the
@@ -478,7 +490,7 @@ def main():
         if len(keep) > args.max_clex_words:
             # Protection overflowed the budget: trim its least frequent words.
             # Regression words and the frequency core are never trimmed.
-            droppable = sorted(keep - regression_ids - freq_core, key=by_prob,
+            droppable = sorted(keep - regression_ids - priority_ids - freq_core, key=by_prob,
                                reverse=True)
             keep.difference_update(droppable[:len(keep) - args.max_clex_words])
         else:
