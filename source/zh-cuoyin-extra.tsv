@@ -3126,3 +3126,9 @@
 齐唱	qichang
 齐家	qijia
 齐集	qiji
+# IME product names: absent from the Wanxiang source entirely (no CIME row, no CLEX word),
+# so a full-string composition like weixinshurufa could never convert. Inject as readings.
+微信输入法	weixinshurufa
+搜狗输入法	sougoushurufa
+百度输入法	baidushurufa
+讯飞输入法	xunfeishurufa
