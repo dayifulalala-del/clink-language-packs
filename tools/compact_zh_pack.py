@@ -407,6 +407,14 @@ def main():
             if word in rows.get(reading, []):
                 corrections[reading] = max(corrections.get(reading, 0), rows[reading].index(word) + 1)
 
+    # Extra pairs sharing one row shift each other: an insertion at slot 4
+    # pushes a word recorded earlier one slot deeper, past its recorded
+    # depth, and truncation then cuts it. Recompute extra depths against
+    # the final row order so every extra word survives.
+    for word, reading in extra:
+        if word in rows.get(reading, []):
+            corrections[reading] = max(corrections.get(reading, 0), rows[reading].index(word) + 1)
+
     terms, manual_readings, priority_terms = protected_terms(args.source)
     protected = set(syllables) | set(corrections)
     protected.update(r for r in manual_readings if r in rows)
