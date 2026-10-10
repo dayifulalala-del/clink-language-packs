@@ -67,9 +67,9 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONUTF8: "1"
-      KNOWN_GOOD_TAG: vzh-wanxiang-v6-lite-z000003
-      KNOWN_GOOD_CIME_SHA256: 4962a5f6748c8078967d81e8d70bd58b9171ef05c7c4e482a33ba5e25711352a
-      KNOWN_GOOD_CLEX_SHA256: 0a05d1b3d1c84648e2d27929b35b8fc1716e468ee055ef10082594306b080205
+      KNOWN_GOOD_TAG: vzh-wanxiang-v6-lite-z000004
+      KNOWN_GOOD_CIME_SHA256: f49af689e1486f737f5e2e82ff8976f16cc93f65447b2d36ab2319023d4f7e56
+      KNOWN_GOOD_CLEX_SHA256: dd2a3b328b0ff7fe056c6e8a8f4c03202d779c86344e4ce9ca63d9a575ca1e29
       MAX_READINGS: ${{ inputs.max_readings || '193415' }}
       MAX_LATIN: ${{ inputs.max_latin || '12000' }}
       TARGET_RANK: ${{ inputs.target_rank || '0' }}
